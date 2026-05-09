@@ -489,6 +489,17 @@ export class HaInsightsCard extends LitElement {
     this._config = config;
   }
 
+  /** Declarative-binding alias for setConfig — lets parents do
+   *  `<ha-insights-card .config=${cfg}>` and have Lit reuse the same
+   *  element across renders so the card preserves its state (open
+   *  modal, in-flight refine, etc). The panel relies on this. */
+  public set config(value: CardConfig | undefined) {
+    if (value) this.setConfig(value);
+  }
+  public get config(): CardConfig {
+    return this._config;
+  }
+
   getCardSize(): number {
     return Math.min(this._insights.length, this._config.max_rows ?? DEFAULT_MAX_ROWS) + 2;
   }

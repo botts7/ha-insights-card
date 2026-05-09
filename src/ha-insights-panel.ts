@@ -279,16 +279,17 @@ export class HaInsightsPanel extends LitElement {
   }
 
   private _renderCard(): TemplateResult {
-    // Imperatively configure the card so setConfig() runs before hass binds.
-    // We rebuild the element each render so config changes (search,
-    // confidence) propagate; the card's own state is regenerated from hass.
-    const cardEl = document.createElement("ha-insights-card") as HTMLElement & {
-      hass?: HassLite;
-      setConfig?: (cfg: CardConfig) => void;
-    };
-    if (cardEl.setConfig) cardEl.setConfig(this._embeddedCardConfig);
-    if (this.hass) cardEl.hass = this.hass;
-    return html`${cardEl}`;
+    // Declarative binding so Lit reuses the SAME card element across panel
+    // re-renders. Earlier we created the element imperatively each render,
+    // which destroyed the card's internal state mid-refine (modal closed,
+    // result discarded). Lit's html template diffs by tag + position; same
+    // tag in the same slot = same element preserved.
+    return html`
+      <ha-insights-card
+        .hass=${this.hass as unknown}
+        .config=${this._embeddedCardConfig as unknown}
+      ></ha-insights-card>
+    `;
   }
 }
 
