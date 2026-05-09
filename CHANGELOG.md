@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0] — 2026-05-09
+
+Companion release for HA Insights v0.4.0 (recorder backfill).
+
+### Added
+
+- **Backfill toast** — on first connect after install, the card calls `home_insights/backfill_status` and surfaces a green toast (`"Backfilled N events from K entities (Dd)"`) when the integration's auto-on-setup backfill ingested real data. Silent on 0-event runs (clean installs without recorder history) and on stale runs (>5min ago) so reloads don't replay old toasts.
+- **Backfill-running indicator** — `"Backfilling history…"` toast if a backfill is in progress when the card connects.
+
+### Changed
+
+- `card_version` handshake bumped to `0.4.0` so the integration can identify the card's protocol-feature surface.
+
 ## [0.3.0] — 2026-05-09
 
 Modal-based detail UI, TTS read-back, Refine-with-LLM, Test actions with per-action results panel.
