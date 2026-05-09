@@ -79,6 +79,19 @@ export interface RedactionPreview {
   privacy_mode: string;
 }
 
+export interface AuditLogCall {
+  id: number;
+  timestamp: string;
+  insight_id: string | null;
+  insight_title: string | null;
+  agent: string;
+  agent_locality: string;
+  redaction_mode: string;
+  bytes_sent: number;
+  bytes_received: number;
+  success: boolean | null;
+}
+
 export interface BackfillStatus {
   running: boolean;
   last: {

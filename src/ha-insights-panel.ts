@@ -17,7 +17,7 @@ import { LitElement, html, css, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
 import "./ha-insights-card";
-import type { CardConfig, HassLite } from "./types";
+import type { AuditLogCall, CardConfig, HassLite } from "./types";
 
 @customElement("ha-insights-panel")
 export class HaInsightsPanel extends LitElement {
@@ -31,6 +31,9 @@ export class HaInsightsPanel extends LitElement {
   @state() private _minConfidence = 0;
   @state() private _backfillBusy = false;
   @state() private _toast = "";
+  @state() private _auditOpen = false;
+  @state() private _auditLog: AuditLogCall[] = [];
+  @state() private _auditBusy = false;
   private _toastTimer?: number;
 
   static styles = css`
@@ -134,6 +137,75 @@ export class HaInsightsPanel extends LitElement {
       max-width: 1100px;
       margin: 0 auto;
     }
+
+    /* Audit log section */
+    .audit {
+      max-width: 1100px;
+      margin: 8px auto 32px;
+      padding: 12px 24px 16px;
+      background: var(--card-background-color, white);
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
+      border-radius: 8px;
+    }
+    .audit-toggle {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .audit-toggle h3 {
+      margin: 0;
+      font-size: 1em;
+      font-weight: 500;
+    }
+    .audit-toggle .arrow {
+      transition: transform 200ms;
+    }
+    .audit-toggle.open .arrow {
+      transform: rotate(90deg);
+    }
+    .audit-empty {
+      color: var(--secondary-text-color);
+      font-size: 0.9em;
+      padding: 12px 0 0;
+    }
+    .audit-list {
+      list-style: none;
+      padding: 0;
+      margin: 12px 0 0;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .audit-list li {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.06));
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 12px;
+      align-items: center;
+      font-size: 0.88em;
+    }
+    .audit-list li:last-child {
+      border-bottom: none;
+    }
+    .audit-icon {
+      width: 1em;
+      text-align: center;
+    }
+    .audit-icon-ok { color: var(--success-color, #2e7d32); }
+    .audit-icon-fail { color: var(--error-color, #c62828); }
+    .audit-meta {
+      color: var(--secondary-text-color);
+      font-size: 0.8em;
+      margin-top: 2px;
+    }
+    .audit-bytes {
+      font-family: var(--code-font-family, monospace);
+      color: var(--secondary-text-color);
+      white-space: nowrap;
+      font-size: 0.8em;
+    }
     @media (max-width: 600px) {
       .header,
       .filters,
@@ -225,6 +297,91 @@ export class HaInsightsPanel extends LitElement {
     }, 3500);
   }
 
+  private async _toggleAudit(): Promise<void> {
+    if (this._auditOpen) {
+      this._auditOpen = false;
+      return;
+    }
+    this._auditOpen = true;
+    if (this._auditLog.length === 0) {
+      await this._loadAuditLog();
+    }
+  }
+
+  private async _loadAuditLog(): Promise<void> {
+    if (!this.hass) return;
+    this._auditBusy = true;
+    try {
+      const result = await this.hass.connection.sendMessagePromise<{
+        calls: AuditLogCall[];
+      }>({ type: "home_insights/audit_log", limit: 25 });
+      this._auditLog = result.calls;
+    } catch (err) {
+      this._showToast(
+        `Audit log failed: ${(err as { message?: string }).message ?? String(err)}`,
+      );
+    } finally {
+      this._auditBusy = false;
+    }
+  }
+
+  private _renderAuditLog(): TemplateResult {
+    return html`
+      <div class="audit">
+        <div
+          class="audit-toggle ${this._auditOpen ? "open" : ""}"
+          @click=${this._toggleAudit}
+        >
+          <h3>🛡️ LLM activity (${this._auditLog.length || "—"})</h3>
+          <span class="arrow">▶</span>
+        </div>
+        ${this._auditOpen
+          ? this._auditBusy
+            ? html`<div class="audit-empty">Loading…</div>`
+            : this._auditLog.length === 0
+              ? html`<div class="audit-empty">
+                  No LLM calls recorded yet. When you click Explain or
+                  Refine on an insight, each call lands here.
+                </div>`
+              : html`
+                  <ul class="audit-list">
+                    ${this._auditLog.map((c) => this._renderAuditRow(c))}
+                  </ul>
+                `
+          : ""}
+      </div>
+    `;
+  }
+
+  private _renderAuditRow(c: AuditLogCall): TemplateResult {
+    const when = new Date(c.timestamp);
+    const local = when.toLocaleString();
+    const success = c.success === true;
+    const fail = c.success === false;
+    const icon = success ? "✓" : fail ? "✗" : "·";
+    const iconCls = success
+      ? "audit-icon-ok"
+      : fail
+        ? "audit-icon-fail"
+        : "";
+    const title =
+      c.insight_title ?? (c.insight_id ? `[deleted ${c.insight_id.slice(0, 8)}]` : "(unknown insight)");
+    return html`
+      <li>
+        <span class="audit-icon ${iconCls}">${icon}</span>
+        <div>
+          <div>${title}</div>
+          <div class="audit-meta">
+            ${local} · ${c.agent} · ${c.redaction_mode}
+          </div>
+        </div>
+        <div class="audit-bytes">
+          ↑${c.bytes_sent}b / ↓${c.bytes_received}b
+        </div>
+      </li>
+    `;
+  }
+
   protected render(): TemplateResult {
     return html`
       <div class="header">
@@ -274,6 +431,7 @@ export class HaInsightsPanel extends LitElement {
       <div class="body">
         ${this._renderCard()}
       </div>
+      ${this._renderAuditLog()}
       ${this._toast ? html`<div class="toast">${this._toast}</div>` : ""}
     `;
   }
