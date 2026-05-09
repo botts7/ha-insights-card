@@ -214,8 +214,8 @@ export class HaInsightsCard extends LitElement {
       background: var(--card-background-color, white);
       color: var(--primary-text-color);
       border-radius: 12px;
-      max-width: 600px;
-      width: 100%;
+      width: 92vw;
+      max-width: 900px;
       max-height: 90vh;
       display: flex;
       flex-direction: column;
@@ -265,9 +265,12 @@ export class HaInsightsCard extends LitElement {
       padding: 12px;
       border-radius: 6px;
       overflow-x: auto;
-      font-size: 0.8em;
-      line-height: 1.4;
+      overflow-y: auto;
+      max-height: 360px;
+      font-size: 0.85em;
+      line-height: 1.5;
       margin: 0;
+      white-space: pre;
     }
     .explanation {
       margin-top: 12px;
@@ -836,7 +839,11 @@ export class HaInsightsCard extends LitElement {
   private _filtered(): Insight[] {
     const min = this._config.min_confidence ?? 0;
     const max = this._config.max_rows ?? DEFAULT_MAX_ROWS;
-    return this._insights.filter((i) => i.confidence >= min).slice(0, max);
+    const search = (this._config.search ?? "").trim().toLowerCase();
+    return this._insights
+      .filter((i) => i.confidence >= min)
+      .filter((i) => !search || i.title.toLowerCase().includes(search))
+      .slice(0, max);
   }
 
   private _openDialog(insightId: string): void {

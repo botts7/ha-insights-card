@@ -106,6 +106,8 @@ export interface CardConfig {
   tts_target_entity_id?: string;
   /** v0.3: optional tts.* engine. If omitted, the card auto-picks the first tts.* entity. */
   tts_engine_entity_id?: string;
+  /** v0.5: case-insensitive substring filter on insight.title. Empty/undefined = no filter. */
+  search?: string;
 }
 
 /** Subset of the HA `hass` object the card uses. */

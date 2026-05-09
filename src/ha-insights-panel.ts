@@ -29,6 +29,9 @@ export class HaInsightsPanel extends LitElement {
 
   @state() private _search = "";
   @state() private _minConfidence = 0;
+  @state() private _backfillBusy = false;
+  @state() private _toast = "";
+  private _toastTimer?: number;
 
   static styles = css`
     :host {
@@ -45,6 +48,12 @@ export class HaInsightsPanel extends LitElement {
       position: sticky;
       top: 0;
       z-index: 4;
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+    }
+    .header .titles {
+      flex: 1;
     }
     .header h1 {
       margin: 0 0 4px;
@@ -54,6 +63,39 @@ export class HaInsightsPanel extends LitElement {
     .header .sub {
       font-size: 0.9em;
       color: var(--secondary-text-color);
+    }
+    .header .actions {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .header button.action {
+      background: none;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
+      padding: 8px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9em;
+      color: var(--primary-text-color);
+    }
+    .header button.action:hover:not(:disabled) {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+    }
+    .header button.action:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .toast {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      background: var(--success-color, #4caf50);
+      color: white;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 0.9em;
+      z-index: 10;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
     }
     .filters {
       display: flex;
@@ -117,17 +159,97 @@ export class HaInsightsPanel extends LitElement {
       title: this._search ? `Insights matching "${this._search}"` : "All insights",
       max_rows: 9999,
       min_confidence: this._minConfidence,
-      // The card doesn't currently filter by free text; we'll add that in a
-      // follow-up. For now confidence + the row cap give the panel real value.
+      search: this._search,
     };
+  }
+
+  private async _runBackfill(): Promise<void> {
+    if (!this.hass) return;
+    this._backfillBusy = true;
+    try {
+      await this.hass.connection.sendMessagePromise({
+        type: "call_service",
+        domain: "ha_insights",
+        service: "backfill",
+        service_data: {},
+      });
+      // Poll once to get summary
+      const status = (await this.hass.connection.sendMessagePromise({
+        type: "home_insights/backfill_status",
+      })) as { running: boolean; last: { events_added: number; entities_seen: number; lookback_days: number } | null };
+      if (status.last) {
+        this._showToast(
+          `Backfilled ${status.last.events_added} events from ${status.last.entities_seen} entities (${status.last.lookback_days}d)`,
+        );
+      } else {
+        this._showToast("Backfill complete");
+      }
+      // Trigger a re-scan so detectors run against the new buffer contents
+      await this.hass.connection.sendMessagePromise({
+        type: "call_service",
+        domain: "ha_insights",
+        service: "scan_now",
+        service_data: {},
+      });
+    } catch (err) {
+      this._showToast(
+        `Backfill failed: ${(err as { message?: string }).message ?? String(err)}`,
+      );
+    } finally {
+      this._backfillBusy = false;
+    }
+  }
+
+  private async _runScanNow(): Promise<void> {
+    if (!this.hass) return;
+    try {
+      await this.hass.connection.sendMessagePromise({
+        type: "call_service",
+        domain: "ha_insights",
+        service: "scan_now",
+        service_data: {},
+      });
+      this._showToast("Scan complete");
+    } catch (err) {
+      this._showToast(
+        `Scan failed: ${(err as { message?: string }).message ?? String(err)}`,
+      );
+    }
+  }
+
+  private _showToast(message: string): void {
+    this._toast = message;
+    window.clearTimeout(this._toastTimer);
+    this._toastTimer = window.setTimeout(() => {
+      this._toast = "";
+    }, 3500);
   }
 
   protected render(): TemplateResult {
     return html`
       <div class="header">
-        <h1>HA Insights</h1>
-        <div class="sub">
-          Patterns the integration noticed in your home — apply, refine, test, or dismiss each.
+        <div class="titles">
+          <h1>HA Insights</h1>
+          <div class="sub">
+            Patterns the integration noticed in your home — apply, refine, test, or dismiss each.
+          </div>
+        </div>
+        <div class="actions">
+          <button
+            class="action"
+            ?disabled=${this._backfillBusy}
+            title="Re-populate the buffer from HA's recorder"
+            @click=${this._runBackfill}
+          >
+            ${this._backfillBusy ? "Backfilling…" : "🔄 Backfill"}
+          </button>
+          <button
+            class="action"
+            title="Run all detectors against the current buffer"
+            @click=${this._runScanNow}
+          >
+            🔍 Scan now
+          </button>
         </div>
       </div>
       <div class="filters">
@@ -152,10 +274,14 @@ export class HaInsightsPanel extends LitElement {
       <div class="body">
         ${this._renderCard()}
       </div>
+      ${this._toast ? html`<div class="toast">${this._toast}</div>` : ""}
     `;
   }
 
   private _renderCard(): TemplateResult {
+    // Imperatively configure the card so setConfig() runs before hass binds.
+    // We rebuild the element each render so config changes (search,
+    // confidence) propagate; the card's own state is regenerated from hass.
     const cardEl = document.createElement("ha-insights-card") as HTMLElement & {
       hass?: HassLite;
       setConfig?: (cfg: CardConfig) => void;
