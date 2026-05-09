@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.1] — 2026-05-09
+
+Card UX polish for the v0.5.1 refine work plus a critical panel state-loss fix.
+
+### Added
+
+- **Side-by-side original-vs-refined view** in the refined-preview dialog — two YAML columns with independent scroll, each capped at 300px tall, refined column has a green left border. Stacks to a single column under 720px wide.
+- **Follow-up feedback textarea** — visible in BOTH the standard insight view (label: "Notes for the LLM (optional, used by Refine)") and the refined-preview view (label: "Ask the LLM for further changes"). Sends the typed text as `feedback` to `home_insights/refine`. Pre-refine notes carry into the first refine call; post-refine notes drive iteration. Auto-clears once the LLM consumes them on a successful refine.
+- **Modal-scoped errors** — actions originating inside the dialog (Apply / Refine / Explain / Test / TTS / Dismiss / Snooze) now surface their errors in a banner at the top of the modal body, not on the main card. Dashboard rows stay visible while the user retries inside the dialog.
+- **Declarative `config` setter on `<ha-insights-card>`** — supports `<ha-insights-card .config=${cfg}>` template binding so parent components (the panel) preserve the card element across re-renders.
+
+### Fixed
+
+- **Panel was destroying card state mid-refine.** The panel's embedded `<ha-insights-card>` was being torn down and re-mounted on every panel re-render (toast tick, hass tick, slider drag) because of imperative `document.createElement` rendering. The fresh card had no `_dialogId`, so the user's open modal vanished mid-Refine, and the in-flight server response landed on a detached element. Switched to declarative Lit template binding via the new `config` setter. Refine, Apply, Test, etc. now survive any panel state change.
+
+### Changed
+
+- `card_version` handshake bumped to `0.5.1`.
+
 ## [0.5.0] — 2026-05-09
 
 Major UX expansion: dedicated panel, visual editor, adaptive sizing, compact tile mode, wider modal, and live search.
