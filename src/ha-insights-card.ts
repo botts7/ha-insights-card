@@ -42,6 +42,8 @@ export class HaInsightsCard extends LitElement {
   @state() private _testBusy = false;
   /** Per-insight refined preview held in card state until Apply or Keep Original. */
   @state() private _refinedById = new Map<string, RefinedState>();
+  /** Latest test_actions result, shown as an inline panel in the dialog. */
+  @state() private _testResults?: { ran: number; error_count: number; results: TestActionsResult["results"]; tested: "original" | "refined" };
 
   private _unsub?: () => void;
   private _toastTimer?: number;
@@ -304,6 +306,69 @@ export class HaInsightsCard extends LitElement {
     .diff-add { color: var(--success-color, #2e7d32); }
     .diff-remove { color: var(--error-color, #c62828); }
     .diff-change { color: var(--warning-color, #ef6c00); }
+
+    /* Test-actions result panel */
+    .test-results {
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+      border-left: 3px solid var(--primary-color);
+    }
+    .test-results.ok {
+      border-left-color: var(--success-color, #4caf50);
+      background: rgba(76, 175, 80, 0.10);
+    }
+    .test-results.fail {
+      border-left-color: var(--error-color, #f44336);
+      background: rgba(244, 67, 54, 0.08);
+    }
+    .test-results-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    .test-results-close {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 1.1em;
+      color: var(--secondary-text-color);
+      line-height: 1;
+      padding: 0 4px;
+    }
+    .test-results ul {
+      list-style: none;
+      padding: 0;
+      margin: 6px 0 0;
+      font-size: 0.88em;
+    }
+    .test-results li {
+      padding: 4px 0;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .test-results .icon {
+      flex-shrink: 0;
+      width: 1.1em;
+      text-align: center;
+    }
+    .test-results .icon-ok { color: var(--success-color, #2e7d32); }
+    .test-results .icon-fail { color: var(--error-color, #c62828); }
+    .test-results .icon-skip { color: var(--secondary-text-color); }
+    .test-results .meta {
+      color: var(--secondary-text-color);
+      font-size: 0.85em;
+      margin-top: 2px;
+    }
+    .test-results-error {
+      color: var(--error-color, #c62828);
+      font-size: 0.85em;
+      margin-top: 2px;
+    }
     .dialog-footer {
       padding: 12px 20px;
       border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
@@ -534,6 +599,7 @@ export class HaInsightsCard extends LitElement {
       `This will fire the ${which} action(s) for real (turning on lights, etc). Continue?`,
     )) return;
     this._testBusy = true;
+    this._testResults = undefined;
     try {
       const payload: Record<string, unknown> = {
         type: "home_insights/test_actions",
@@ -541,17 +607,63 @@ export class HaInsightsCard extends LitElement {
       };
       if (override) payload.payload_override = override;
       const result = await this.hass.connection.sendMessagePromise<TestActionsResult>(payload);
-      if (result.error_count > 0) {
-        const firstError = result.results.find((r) => !r.ok && !r.skipped)?.error ?? "unknown";
-        this._error = `Test ran ${result.ran}, ${result.error_count} error(s): ${firstError}`;
-      } else {
-        this._toast = `Tested: ran ${result.ran} action(s)`;
-      }
+      this._testResults = {
+        ran: result.ran,
+        error_count: result.error_count,
+        results: result.results,
+        tested: which,
+      };
     } catch (err) {
       this._error = `Test actions failed: ${this._asMessage(err)}`;
     } finally {
       this._testBusy = false;
     }
+  }
+
+  private _clearTestResults(): void {
+    this._testResults = undefined;
+  }
+
+  private _renderTestResults(): TemplateResult | typeof nothing {
+    const tr = this._testResults;
+    if (!tr) return nothing;
+    const allOk = tr.error_count === 0 && tr.ran > 0;
+    const allFail = tr.ran === 0 && tr.error_count > 0;
+    const cls = allOk ? "test-results ok" : allFail ? "test-results fail" : "test-results";
+    const summary = `Tested ${tr.tested} — ${tr.ran} ran, ${tr.error_count} error${tr.error_count === 1 ? "" : "s"}`;
+    return html`
+      <div class=${cls}>
+        <div class="test-results-header">
+          <span>${summary}</span>
+          <button
+            class="test-results-close"
+            aria-label="Close test results"
+            @click=${this._clearTestResults}
+          >×</button>
+        </div>
+        <ul>
+          ${tr.results.map((r) => {
+            const icon = r.ok ? "✓" : r.skipped ? "—" : "✗";
+            const iconCls = r.ok ? "icon-ok" : r.skipped ? "icon-skip" : "icon-fail";
+            return html`
+              <li>
+                <span class="icon ${iconCls}">${icon}</span>
+                <div>
+                  <div>
+                    ${r.service ?? "(action)"}${
+                      r.skipped ? " (skipped)" : ""
+                    }
+                  </div>
+                  ${r.error
+                    ? html`<div class="test-results-error">${r.error}</div>`
+                    : nothing}
+                </div>
+              </li>
+            `;
+          })}
+        </ul>
+      </div>
+    `;
   }
 
   /** Auto-pick a tts.* entity if the user didn't configure one. */
@@ -607,10 +719,12 @@ export class HaInsightsCard extends LitElement {
 
   private _openDialog(insightId: string): void {
     this._dialogId = insightId;
+    this._testResults = undefined;
   }
 
   private _closeDialog(): void {
     this._dialogId = undefined;
+    this._testResults = undefined;
   }
 
   private _renderModeBadge(mode: PrivacyMode | undefined): TemplateResult | typeof nothing {
@@ -756,10 +870,12 @@ export class HaInsightsCard extends LitElement {
           </div>
           ${refined
             ? html`<div class="dialog-body">
+                ${this._renderTestResults()}
                 ${this._renderRefinedPreview(insight, refined)}
               </div>`
             : html`
                 <div class="dialog-body">
+                  ${this._renderTestResults()}
                   <div class="row-meta">
                     <span class="pill">confidence ${confidencePct}%</span>
                     <span class="pill">${insight.detector}</span>
