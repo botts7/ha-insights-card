@@ -1233,11 +1233,50 @@ export class HaInsightsCard extends LitElement {
     this._refineBusy = true;
     this._modalError = undefined;
     try {
+      // v1.0 RC #1: pre-flight cost estimate. The server runs the same
+      // redactor + prompt build as the actual Refine but stops before
+      // the LLM call, so we get an accurate token + USD figure for free.
+      // If it crosses the configured threshold, ask the user to confirm
+      // before burning tokens. Failures fall through silently — we'd
+      // rather Refine than block on a flaky pre-flight.
+      const feedback = (this._feedbackById.get(insight.id) ?? "").trim();
+      try {
+        const estimate = await this.hass.connection.sendMessagePromise<{
+          tokens_in: number;
+          tokens_out: number;
+          cost_usd: number;
+          cost_source: string;
+          threshold_usd: number;
+          requires_confirm: boolean;
+          agent_id: string | null;
+        }>({
+          type: "home_insights/refine_cost_estimate",
+          insight_id: insight.id,
+          ...(feedback ? { feedback } : {}),
+        });
+        if (estimate.requires_confirm) {
+          const tokens = estimate.tokens_in + estimate.tokens_out;
+          const dollars = estimate.cost_usd.toFixed(4);
+          const agent = estimate.agent_id ?? "default agent";
+          const ok = window.confirm(
+            `Refine on ${agent} will use ~${tokens} tokens (~$${dollars}). ` +
+              `That's above the configured $${estimate.threshold_usd.toFixed(2)} ` +
+              `threshold. Continue?`,
+          );
+          if (!ok) {
+            this._toast = "Refine canceled";
+            return;
+          }
+        }
+      } catch {
+        // Pre-flight failed — proceed with the actual refine; the user
+        // sees the regular refine error path if it really is broken.
+      }
+
       const message: Record<string, unknown> = {
         type: "home_insights/refine",
         insight_id: insight.id,
       };
-      const feedback = (this._feedbackById.get(insight.id) ?? "").trim();
       if (feedback) message.feedback = feedback;
       const result =
         await this.hass.connection.sendMessagePromise<RefineResult>(message);
