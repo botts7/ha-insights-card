@@ -727,7 +727,10 @@ export class HaInsightsCard extends LitElement {
 
     try {
       const result = await this.hass.connection.sendMessagePromise<{ insights: Insight[] }>(
-        { type: "home_insights/list" },
+        {
+          type: "home_insights/list",
+          include_applied: Boolean(this._config.include_applied),
+        },
       );
       this._insights = result.insights ?? [];
     } catch (err) {
@@ -779,17 +782,30 @@ export class HaInsightsCard extends LitElement {
     if (!event.insight) return;
     const next = [...this._insights];
     const idx = next.findIndex((i) => i.id === event.insight!.id);
+    const wantApplied = Boolean(this._config.include_applied);
     if (event.action === "added") {
       if (idx >= 0) next[idx] = event.insight;
       else next.unshift(event.insight);
     } else if (
       event.action === "dismissed" ||
-      event.action === "applied" ||
       event.action === "snoozed"
     ) {
       if (idx >= 0) next.splice(idx, 1);
-      // If the dialog was open on the removed insight, close it.
       if (this._dialogId === event.insight.id) this._closeDialog();
+    } else if (event.action === "applied") {
+      // If this card includes_applied, keep the row + update with the
+      // new applied state; otherwise drop it from the active list.
+      if (wantApplied) {
+        if (idx >= 0) next[idx] = event.insight;
+        else next.unshift(event.insight);
+      } else if (idx >= 0) {
+        next.splice(idx, 1);
+        if (this._dialogId === event.insight.id) this._closeDialog();
+      }
+    } else if (event.action === "undone") {
+      // Insight is back to active state — keep visible regardless
+      if (idx >= 0) next[idx] = event.insight;
+      else next.unshift(event.insight);
     } else if (idx >= 0) {
       next[idx] = event.insight;
     }
@@ -800,6 +816,42 @@ export class HaInsightsCard extends LitElement {
   private _removeFromList(id: string): void {
     this._insights = this._insights.filter((i) => i.id !== id);
     if (this._dialogId === id) this._closeDialog();
+  }
+
+  private async _undo(insight: Insight, force = false): Promise<void> {
+    if (!this.hass) return;
+    this._busyId = insight.id;
+    try {
+      const result = await this.hass.connection.sendMessagePromise<{
+        automation_id: string;
+        drift_detected: boolean;
+        force_used: boolean;
+      }>({
+        type: "home_insights/undo",
+        insight_id: insight.id,
+        force,
+      });
+      this._toast = result.drift_detected && result.force_used
+        ? `Undid ${insight.title} (forced — your edits were lost)`
+        : `Undid ${insight.title}`;
+    } catch (err) {
+      const message = this._asMessage(err);
+      // Drift error is recoverable — offer force-undo confirmation
+      const code = (err as { code?: string }).code;
+      if (code === "drift") {
+        const proceed = window.confirm(
+          `${message}\n\nForce undo and lose your manual edits?`,
+        );
+        if (proceed) {
+          await this._undo(insight, true);
+          return;
+        }
+      } else {
+        this._failModal(`Undo failed: ${message}`);
+      }
+    } finally {
+      this._busyId = undefined;
+    }
   }
 
   private async _apply(insight: Insight, refinedPayload?: Record<string, unknown>): Promise<void> {
@@ -1330,6 +1382,13 @@ export class HaInsightsCard extends LitElement {
           ${ageLabel
             ? html`<span class="pill" title=${insight.created_at}>${ageLabel}</span>`
             : nothing}
+          ${insight.applied_at
+            ? html`<span
+                class="pill"
+                style="background: rgba(76, 175, 80, 0.18); color: var(--success-color, #2e7d32);"
+                title="Applied at ${insight.applied_at}"
+              >✓ applied</span>`
+            : nothing}
           ${insight.conflicts_with.length > 0
             ? html`<span class="pill" style="color: var(--warning-color)">conflicts</span>`
             : nothing}
@@ -1610,16 +1669,31 @@ export class HaInsightsCard extends LitElement {
                   <button class="action" ?disabled=${busy} @click=${() => this._dismiss(insight)}>
                     Dismiss
                   </button>
-                  <button class="action" ?disabled=${busy} @click=${() => this._snooze(insight)}>
-                    Snooze 7d
-                  </button>
-                  <button
-                    class="action primary"
-                    ?disabled=${busy}
-                    @click=${() => this._apply(insight)}
-                  >
-                    ${busy ? "applying…" : "Apply"}
-                  </button>
+                  ${insight.applied_at
+                    ? nothing
+                    : html`<button
+                        class="action"
+                        ?disabled=${busy}
+                        @click=${() => this._snooze(insight)}
+                      >
+                        Snooze 7d
+                      </button>`}
+                  ${insight.applied_at
+                    ? html`<button
+                        class="action primary"
+                        ?disabled=${busy}
+                        title="Remove the automation and revert this insight to active"
+                        @click=${() => this._undo(insight)}
+                      >
+                        ${busy ? "undoing…" : "↶ Undo apply"}
+                      </button>`
+                    : html`<button
+                        class="action primary"
+                        ?disabled=${busy}
+                        @click=${() => this._apply(insight)}
+                      >
+                        ${busy ? "applying…" : "Apply"}
+                      </button>`}
                 </div>
               `}
         </div>

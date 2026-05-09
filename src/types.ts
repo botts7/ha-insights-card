@@ -32,6 +32,11 @@ export interface Insight {
   snoozed_until: string | null;
   explanation: string | null;
   conflicts_with: string[];
+  /** v0.8: ISO timestamp when the apply happened, or null if not applied. */
+  applied_at?: string | null;
+  applied_artifact_id?: string | null;
+  /** v0.8: ISO timestamp the 7-day undo window expires. */
+  undo_window_expires_at?: string | null;
 }
 
 export type PrivacyMode = "off" | "local" | "cloud";
@@ -140,6 +145,8 @@ export interface CardConfig {
   sort_by?: "confidence" | "age" | "detector";
   /** v0.7: render insights grouped under section headers. */
   group_by?: "area" | "detector" | "none";
+  /** v0.8: include already-applied insights in the list (so Undo is reachable). */
+  include_applied?: boolean;
 }
 
 /** Subset of the HA `hass` object the card uses. */
