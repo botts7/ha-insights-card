@@ -70,6 +70,15 @@ export interface TestActionsResult {
   }>;
 }
 
+export interface RedactionPreview {
+  redacted_title: string;
+  redacted_payload: Record<string, unknown>;
+  entities_blocked: string[];
+  pseudonym_map: Record<string, string>;
+  attributes_stripped: string[];
+  privacy_mode: string;
+}
+
 export interface BackfillStatus {
   running: boolean;
   last: {

@@ -18,6 +18,7 @@ import type {
   HelloResult,
   Insight,
   PrivacyMode,
+  RedactionPreview,
   RefineResult,
   RefinedState,
   SubscribeEvent,
@@ -52,6 +53,9 @@ export class HaInsightsCard extends LitElement {
   @state() private _renameEdits = new Map<string, { alias?: string; description?: string }>();
   /** Per-insight in-progress follow-up feedback for the next Refine call. */
   @state() private _feedbackById = new Map<string, string>();
+  /** Per-insight redaction preview state — shown when user clicks "What gets sent?" */
+  @state() private _previewById = new Map<string, RedactionPreview>();
+  @state() private _previewBusy = false;
   /** Latest test_actions result, shown as an inline panel in the dialog. */
   @state() private _testResults?: { ran: number; error_count: number; results: TestActionsResult["results"]; tested: "original" | "refined" };
   /**
@@ -406,6 +410,55 @@ export class HaInsightsCard extends LitElement {
       .compare {
         grid-template-columns: 1fr;
       }
+    }
+
+    /* Redaction preview ("What gets sent?") panel */
+    .preview {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-left: 3px solid var(--info-color, #2196f3);
+      background: rgba(33, 150, 243, 0.08);
+      border-radius: 4px;
+    }
+    .preview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .preview-header strong {
+      color: var(--info-color, #1565c0);
+    }
+    .preview-stats {
+      font-size: 0.8em;
+      color: var(--secondary-text-color);
+      margin-bottom: 8px;
+    }
+    .preview-stats span {
+      margin-right: 12px;
+    }
+    .preview pre {
+      max-height: 240px;
+      overflow: auto;
+      margin: 0;
+      padding: 8px;
+      background: var(--code-background-color, rgba(0, 0, 0, 0.04));
+      border-radius: 4px;
+      font-size: 0.78em;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .preview-pseudonyms {
+      margin-top: 8px;
+      font-size: 0.78em;
+      color: var(--secondary-text-color);
+    }
+    .preview-pseudonyms code {
+      font-family: var(--code-font-family, monospace);
+      background: var(--code-background-color, rgba(0, 0, 0, 0.04));
+      padding: 1px 4px;
+      border-radius: 3px;
     }
 
     /* Follow-up feedback for re-refine */
@@ -902,6 +955,74 @@ export class HaInsightsCard extends LitElement {
     }
   }
 
+  private async _previewRedaction(insight: Insight): Promise<void> {
+    if (!this.hass) return;
+    // Toggle off if already shown
+    if (this._previewById.has(insight.id)) {
+      const next = new Map(this._previewById);
+      next.delete(insight.id);
+      this._previewById = next;
+      return;
+    }
+    this._previewBusy = true;
+    try {
+      const result =
+        await this.hass.connection.sendMessagePromise<RedactionPreview>({
+          type: "home_insights/redaction_preview",
+          insight_id: insight.id,
+        });
+      const next = new Map(this._previewById);
+      next.set(insight.id, result);
+      this._previewById = next;
+    } catch (err) {
+      this._failModal(
+        `Preview failed: ${this._asMessage(err)}`,
+      );
+    } finally {
+      this._previewBusy = false;
+    }
+  }
+
+  private _renderPreview(insight: Insight): TemplateResult | typeof nothing {
+    const preview = this._previewById.get(insight.id);
+    if (!preview) return nothing;
+    const pseudonymCount = Object.keys(preview.pseudonym_map).length;
+    return html`
+      <div class="preview">
+        <div class="preview-header">
+          <strong>🛡️ What the LLM would see (${preview.privacy_mode} mode)</strong>
+          <button
+            class="dialog-close"
+            aria-label="Close preview"
+            @click=${() => this._previewRedaction(insight)}
+          >×</button>
+        </div>
+        <div class="preview-stats">
+          <span>${pseudonymCount} entit${pseudonymCount === 1 ? "y" : "ies"} pseudonymized</span>
+          <span>${preview.attributes_stripped.length} attribute${preview.attributes_stripped.length === 1 ? "" : "s"} stripped</span>
+          ${preview.entities_blocked.length > 0
+            ? html`<span style="color: var(--error-color)">${preview.entities_blocked.length} blocked</span>`
+            : nothing}
+        </div>
+        <pre>${JSON.stringify(preview.redacted_payload, null, 2)}</pre>
+        ${pseudonymCount > 0
+          ? html`
+              <div class="preview-pseudonyms">
+                Pseudonym map (kept locally only):
+                ${Object.entries(preview.pseudonym_map).map(
+                  ([real, pseudo]) => html`
+                    <div>
+                      <code>${real}</code> → <code>${pseudo}</code>
+                    </div>
+                  `,
+                )}
+              </div>
+            `
+          : nothing}
+      </div>
+    `;
+  }
+
   private _keepOriginal(insightId: string): void {
     const next = new Map(this._refinedById);
     next.delete(insightId);
@@ -1239,6 +1360,7 @@ export class HaInsightsCard extends LitElement {
           <pre>${JSON.stringify(refined.payload, null, 2)}</pre>
         </div>
       </div>
+      ${this._renderPreview(insight)}
       ${this._renderRename(insight, refined)}
       ${this._renderFeedbackInput(insight, "Ask the LLM for further changes")}
       <div class="explain-row">
@@ -1319,6 +1441,7 @@ export class HaInsightsCard extends LitElement {
                   ${insight.explanation
                     ? html`<div class="explanation">${insight.explanation}</div>`
                     : nothing}
+                  ${this._renderPreview(insight)}
                   ${this._renderRename(insight, undefined)}
                   ${llmEnabled
                     ? this._renderFeedbackInput(
@@ -1347,6 +1470,18 @@ export class HaInsightsCard extends LitElement {
                             @click=${() => this._refine(insight)}
                           >
                             ${this._refineBusy ? "asking LLM…" : "✨ Refine with LLM"}
+                          </button>
+                          <button
+                            class="action"
+                            ?disabled=${this._previewBusy}
+                            title="Preview the exact data that would be sent to the LLM"
+                            @click=${() => this._previewRedaction(insight)}
+                          >
+                            ${this._previewBusy
+                              ? "loading…"
+                              : this._previewById.has(insight.id)
+                                ? "🛡️ Hide preview"
+                                : "🛡️ What gets sent?"}
                           </button>
                         `
                       : nothing}
