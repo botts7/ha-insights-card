@@ -80,6 +80,29 @@ export class HaInsightsCard extends LitElement {
       padding: 8px 16px;
       font-size: 0.85em;
     }
+    .error-banner {
+      background: var(--error-color, #f44336);
+      color: white;
+      padding: 10px 16px;
+      font-size: 0.85em;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .error-banner button {
+      background: rgba(255, 255, 255, 0.18);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: white;
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85em;
+      flex-shrink: 0;
+    }
+    .error-banner button:hover {
+      background: rgba(255, 255, 255, 0.28);
+    }
     .badge {
       display: inline-flex;
       align-items: center;
@@ -478,10 +501,17 @@ export class HaInsightsCard extends LitElement {
     `;
   }
 
+  private _renderErrorBanner(): TemplateResult | typeof nothing {
+    if (!this._error) return nothing;
+    return html`
+      <div class="error-banner">
+        <span>${this._error}</span>
+        <button @click=${() => (this._error = undefined)}>Dismiss</button>
+      </div>
+    `;
+  }
+
   protected render(): TemplateResult {
-    if (this._error) {
-      return html`<ha-card>${this._renderHeader()}<div class="error">${this._error}</div></ha-card>`;
-    }
     if (this._loading) {
       return html`
         <ha-card>
@@ -495,6 +525,7 @@ export class HaInsightsCard extends LitElement {
       <ha-card>
         ${this._renderHeader()}
         ${this._renderSkewBanner()}
+        ${this._renderErrorBanner()}
         ${this._toast ? html`<div class="toast">${this._toast}</div>` : nothing}
         ${rows.length === 0
           ? html`<div class="empty">
