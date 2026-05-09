@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.0] — 2026-05-09
+
+Card UX for v0.2's LLM Explain feature.
+
+### Added
+
+- **Privacy mode badge** in the header (🚫 Off / 🟢 Local / 🟡 Cloud) sourced from the integration's `home_insights/hello` response.
+- **Click-to-expand row detail** showing the full automation YAML + an **Explain with LLM** button (gated by mode != Off).
+- **LLM explanation rendering** as a styled blockquote below the YAML preview after a successful Explain call.
+- **Dismissible error banner** at the top of the card — rows stay visible so the user can fix the underlying issue and retry without losing state.
+- **Optimistic local removal** + green confirmation toast on Apply / Snooze / Dismiss; row vanishes immediately rather than waiting for the subscribe round-trip.
+
+### Changed
+
+- Subscribe-event handler removes rows on `applied` / `snoozed` / `dismissed` (was only `dismissed` in v0.1).
+
 ## [0.1.0] — 2026-05-08
 
 First release alongside the [HA Insights integration](https://github.com/botts7/ha-insights) v0.1.0.
