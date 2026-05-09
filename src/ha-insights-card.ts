@@ -68,6 +68,13 @@ export class HaInsightsCard extends LitElement {
     .header {
       padding: 12px 16px 8px;
       border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .header .titles {
+      flex: 1;
+      min-width: 0;
     }
     .title {
       font-size: 1.1em;
@@ -77,6 +84,45 @@ export class HaInsightsCard extends LitElement {
       font-size: 0.8em;
       color: var(--secondary-text-color);
       margin-top: 2px;
+    }
+    .header a.view-all {
+      flex-shrink: 0;
+      font-size: 0.85em;
+      color: var(--primary-color);
+      text-decoration: none;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: background 120ms;
+    }
+    .header a.view-all:hover {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+    }
+    /* Compact tile: single row, full-width clickable */
+    .compact-tile {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 20px;
+      cursor: pointer;
+      transition: background 120ms;
+      text-decoration: none;
+      color: inherit;
+    }
+    .compact-tile:hover {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.03));
+    }
+    .compact-tile .count {
+      font-size: 1.4em;
+      font-weight: 500;
+    }
+    .compact-tile .label {
+      color: var(--secondary-text-color);
+      font-size: 0.85em;
+      margin-top: 2px;
+    }
+    .compact-tile .arrow {
+      font-size: 1.2em;
+      color: var(--primary-color);
     }
     .skew-banner {
       background: var(--warning-color, #ff9800);
@@ -880,11 +926,36 @@ export class HaInsightsCard extends LitElement {
       : "connecting…";
     return html`
       <div class="header">
-        <div class="title">
-          ${title} ${this._renderModeBadge(this._hello?.privacy_mode)}
+        <div class="titles">
+          <div class="title">
+            ${title} ${this._renderModeBadge(this._hello?.privacy_mode)}
+          </div>
+          <div class="subtitle">${sub}</div>
         </div>
-        <div class="subtitle">${sub}</div>
+        <a
+          class="view-all"
+          href="/ha-insights"
+          title="Open the full HA Insights panel"
+        >View all →</a>
       </div>
+    `;
+  }
+
+  private _renderCompactTile(rows: Insight[]): TemplateResult {
+    const count = rows.length;
+    const label = count === 0
+      ? "No insights yet — patterns will appear as your home settles in"
+      : count === 1
+        ? "1 insight ready to review"
+        : `${count} insights ready to review`;
+    return html`
+      <a class="compact-tile" href="/ha-insights">
+        <div>
+          <div class="count">${count} ${count === 1 ? "insight" : "insights"}</div>
+          <div class="label">${label}</div>
+        </div>
+        <div class="arrow">→</div>
+      </a>
     `;
   }
 
@@ -1119,6 +1190,15 @@ export class HaInsightsCard extends LitElement {
       `;
     }
     const rows = this._filtered();
+    if (this._config.compact) {
+      return html`
+        <ha-card>
+          ${this._renderSkewBanner()}
+          ${this._renderErrorBanner()}
+          ${this._renderCompactTile(rows)}
+        </ha-card>
+      `;
+    }
     return html`
       <ha-card>
         ${this._renderHeader()}

@@ -108,6 +108,12 @@ export interface CardConfig {
   tts_engine_entity_id?: string;
   /** v0.5: case-insensitive substring filter on insight.title. Empty/undefined = no filter. */
   search?: string;
+  /**
+   * v0.5: collapse the card to a single-line tile ("X insights -> ") that
+   * deep-links to the /ha-insights panel. Useful when the dashboard wants
+   * an at-a-glance summary instead of inline list interaction.
+   */
+  compact?: boolean;
 }
 
 /** Subset of the HA `hass` object the card uses. */
