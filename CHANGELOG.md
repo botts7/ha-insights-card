@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.0] — 2026-05-10
+
+Card UX for v0.8.0's undo flow.
+
+### Added
+
+- **Insight type** gains `applied_at`, `applied_artifact_id`, `undo_window_expires_at` (mirrors integration v0.8 schema).
+- **`include_applied` card config** (default `false`) — when true, the card lists already-applied insights so the Undo button is reachable from the dashboard. Wired through to `home_insights/list`.
+- **✓ applied row pill** — green pill with `Applied at <timestamp>` tooltip on rows where `applied_at` is set.
+- **↶ Undo apply button** — replaces the Apply button in the modal footer when an insight is already applied. Calls `home_insights/undo`. On `code: "drift"` error, shows a `window.confirm` with the server's message; on user confirmation, retries with `force=true` (and the toast warns that manual edits were lost).
+
+### Changed
+
+- Subscribe handler distinguishes `applied` (drop or update by `include_applied`) and the new `undone` event (always re-add or update so the row reappears in the active list).
+- `card_version` handshake bumped to `0.8.0`.
+
 ## [0.7.0] — 2026-05-09
 
 UX polish to scale with the new detector library — color coding, age, sort, group.
