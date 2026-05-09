@@ -47,10 +47,17 @@ export class HaInsightsCard extends LitElement {
   @state() private _renameEdits = new Map<string, { alias?: string; description?: string }>();
   /** Latest test_actions result, shown as an inline panel in the dialog. */
   @state() private _testResults?: { ran: number; error_count: number; results: TestActionsResult["results"]; tested: "original" | "refined" };
+  /**
+   * v0.5: rows that fit in the card's currently-rendered height. Updated
+   * by ResizeObserver. Used as the row cap when the user hasn't set
+   * max_rows explicitly. -1 means "not yet measured; use the default."
+   */
+  @state() private _autoMaxRows = -1;
 
   private _unsub?: () => void;
   private _toastTimer?: number;
   private _wired = false;
+  private _resizeObserver?: ResizeObserver;
   private _keydownHandler = (e: KeyboardEvent) => {
     if (e.key === "Escape" && this._dialogId) {
       this._closeDialog();
@@ -484,6 +491,25 @@ export class HaInsightsCard extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener("keydown", this._keydownHandler);
+    this._resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        this._updateAutoMaxRows(entry.contentRect.height);
+      }
+    });
+    this._resizeObserver.observe(this);
+  }
+
+  /** Approximate per-row height — title + meta + padding + border. */
+  private static readonly ROW_HEIGHT_PX = 72;
+  /** Header consumes a fixed slice; banners/toast eat into the body too. */
+  private static readonly HEADER_HEIGHT_PX = 60;
+
+  private _updateAutoMaxRows(hostHeight: number): void {
+    const available = Math.max(0, hostHeight - HaInsightsCard.HEADER_HEIGHT_PX);
+    const rows = Math.max(1, Math.floor(available / HaInsightsCard.ROW_HEIGHT_PX));
+    if (rows !== this._autoMaxRows) {
+      this._autoMaxRows = rows;
+    }
   }
 
   protected updated(changedProps: PropertyValues): void {
@@ -511,6 +537,8 @@ export class HaInsightsCard extends LitElement {
     this._unsub?.();
     this._unsub = undefined;
     this._wired = false;
+    this._resizeObserver?.disconnect();
+    this._resizeObserver = undefined;
   }
 
   private async _wire(): Promise<void> {
@@ -884,12 +912,21 @@ export class HaInsightsCard extends LitElement {
 
   private _filtered(): Insight[] {
     const min = this._config.min_confidence ?? 0;
-    const max = this._config.max_rows ?? DEFAULT_MAX_ROWS;
+    // Cap precedence: explicit max_rows in config > auto-fit measurement >
+    // hard-coded default. Lets the panel set max_rows: 9999 to disable
+    // auto-fit, while default-config cards adapt to their container.
+    const userMax = this._config.max_rows;
+    const cap =
+      userMax !== undefined
+        ? userMax
+        : this._autoMaxRows > 0
+          ? this._autoMaxRows
+          : DEFAULT_MAX_ROWS;
     const search = (this._config.search ?? "").trim().toLowerCase();
     return this._insights
       .filter((i) => i.confidence >= min)
       .filter((i) => !search || i.title.toLowerCase().includes(search))
-      .slice(0, max);
+      .slice(0, cap);
   }
 
   private _openDialog(insightId: string): void {
