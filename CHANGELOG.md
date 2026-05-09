@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0] — 2026-05-09
+
+Card UX for v0.6.0's trust & visibility work.
+
+### Added
+
+- **Per-row trust pill** — small 🟢 local or 🟡 cloud pill in each insight's meta strip mirroring the integration's privacy mode. Suppressed in OFF mode. Constant reminder of where any LLM action on this row would go.
+- **🛡️ "What gets sent?" button** — appears next to Explain/Refine when LLM is enabled. Calls `home_insights/redaction_preview` and shows an inline panel with: stats (N pseudonymized, K stripped, M blocked), the actual redacted JSON, and the local pseudonym map (real → pseudo). Toggle: click again to hide. Available in both standard and refined-preview views.
+- **Panel "🛡️ LLM activity" section** — collapsible audit log at the bottom of the /ha-insights panel. Lazy-loads last 25 outbound LLM calls on first open: ✓/✗ icon, insight title, timestamp, agent, redaction mode, bytes sent/received. Deleted insights show as `[deleted <id>]`.
+
+### Changed
+
+- `card_version` handshake bumped to `0.6.0`.
+
 ## [0.5.1] — 2026-05-09
 
 Card UX polish for the v0.5.1 refine work plus a critical panel state-loss fix.
