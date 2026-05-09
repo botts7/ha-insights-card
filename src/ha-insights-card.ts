@@ -1144,6 +1144,7 @@ export class HaInsightsCard extends LitElement {
           <span class="pill">confidence ${confidencePct}%</span>
           <span class="pill">${insight.detector}</span>
           ${insight.area_id ? html`<span class="pill">${insight.area_id}</span>` : nothing}
+          ${this._renderTrustPill()}
           ${insight.conflicts_with.length > 0
             ? html`<span class="pill" style="color: var(--warning-color)">conflicts</span>`
             : nothing}
@@ -1152,6 +1153,31 @@ export class HaInsightsCard extends LitElement {
             : nothing}
         </div>
       </div>
+    `;
+  }
+
+  /** Per-row trust indicator. Mirrors the header privacy mode but at row
+   *  level so users have a constant reminder of what *any* LLM action on
+   *  this row will do. Suppressed in OFF mode (no LLM = no trust concern).
+   */
+  private _renderTrustPill(): TemplateResult | typeof nothing {
+    const mode = this._hello?.privacy_mode;
+    if (!mode || mode === "off") return nothing;
+    if (mode === "local") {
+      return html`
+        <span
+          class="pill"
+          style="background: rgba(76, 175, 80, 0.18); color: var(--success-color, #2e7d32);"
+          title="LLM actions on this insight stay on your local network"
+        >🟢 local</span>
+      `;
+    }
+    return html`
+      <span
+        class="pill"
+        style="background: rgba(255, 152, 0, 0.18); color: var(--warning-color, #e65100);"
+        title="LLM actions on this insight send pseudonymized data to a cloud LLM"
+      >🟡 cloud</span>
     `;
   }
 
