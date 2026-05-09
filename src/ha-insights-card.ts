@@ -1170,9 +1170,28 @@ export class HaInsightsCard extends LitElement {
     `;
   }
 
+  private _renderFeedbackInput(insight: Insight, label: string): TemplateResult {
+    const feedback = this._feedbackById.get(insight.id) ?? "";
+    return html`
+      <div class="feedback">
+        <h5>${label}</h5>
+        <textarea
+          placeholder="e.g. Add a sun.below_horizon condition; change debounce to 10s; only run when nobody is home"
+          .value=${feedback}
+          @input=${(e: Event) => {
+            const value = (e.target as HTMLTextAreaElement).value;
+            const next = new Map(this._feedbackById);
+            if (value) next.set(insight.id, value);
+            else next.delete(insight.id);
+            this._feedbackById = next;
+          }}
+        ></textarea>
+      </div>
+    `;
+  }
+
   private _renderRefinedPreview(insight: Insight, refined: RefinedState): TemplateResult {
     const busy = this._busyId === insight.id;
-    const feedback = this._feedbackById.get(insight.id) ?? "";
     return html`
       <div class="refined-banner">
         <strong>✨ Refined version proposed</strong>
@@ -1195,20 +1214,7 @@ export class HaInsightsCard extends LitElement {
         </div>
       </div>
       ${this._renderRename(insight, refined)}
-      <div class="feedback">
-        <h5>Ask the LLM for further changes</h5>
-        <textarea
-          placeholder="e.g. Add a sun.below_horizon condition; change debounce to 10s"
-          .value=${feedback}
-          @input=${(e: Event) => {
-            const value = (e.target as HTMLTextAreaElement).value;
-            const next = new Map(this._feedbackById);
-            if (value) next.set(insight.id, value);
-            else next.delete(insight.id);
-            this._feedbackById = next;
-          }}
-        ></textarea>
-      </div>
+      ${this._renderFeedbackInput(insight, "Ask the LLM for further changes")}
       <div class="explain-row">
         <button
           class="action"
@@ -1288,6 +1294,12 @@ export class HaInsightsCard extends LitElement {
                     ? html`<div class="explanation">${insight.explanation}</div>`
                     : nothing}
                   ${this._renderRename(insight, undefined)}
+                  ${llmEnabled
+                    ? this._renderFeedbackInput(
+                        insight,
+                        "Notes for the LLM (optional, used by Refine)",
+                      )
+                    : nothing}
                   <div class="explain-row">
                     ${llmEnabled && !insight.explanation
                       ? html`
