@@ -594,10 +594,7 @@ export class HaInsightsCard extends LitElement {
 
   private async _testActions(insight: Insight, override?: Record<string, unknown>): Promise<void> {
     if (!this.hass) return;
-    const which = override ? "refined" : "original";
-    if (!window.confirm(
-      `This will fire the ${which} action(s) for real (turning on lights, etc). Continue?`,
-    )) return;
+    const which: "original" | "refined" = override ? "refined" : "original";
     this._testBusy = true;
     this._testResults = undefined;
     try {
