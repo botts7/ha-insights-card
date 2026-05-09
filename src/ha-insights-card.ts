@@ -50,6 +50,8 @@ export class HaInsightsCard extends LitElement {
   @state() private _refinedById = new Map<string, RefinedState>();
   /** Per-insight alias/description rename edits, applied as payload_override on Apply. */
   @state() private _renameEdits = new Map<string, { alias?: string; description?: string }>();
+  /** Per-insight in-progress follow-up feedback for the next Refine call. */
+  @state() private _feedbackById = new Map<string, string>();
   /** Latest test_actions result, shown as an inline panel in the dialog. */
   @state() private _testResults?: { ran: number; error_count: number; results: TestActionsResult["results"]; tested: "original" | "refined" };
   /**
@@ -370,6 +372,70 @@ export class HaInsightsCard extends LitElement {
     .diff-add { color: var(--success-color, #2e7d32); }
     .diff-remove { color: var(--error-color, #c62828); }
     .diff-change { color: var(--warning-color, #ef6c00); }
+
+    /* Side-by-side YAML compare for refined preview */
+    .compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 12px 0;
+    }
+    .compare-col h5 {
+      margin: 0 0 6px;
+      font-size: 0.8em;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--secondary-text-color);
+    }
+    .compare-col pre {
+      max-height: 300px;
+      overflow: auto;
+      margin: 0;
+      padding: 10px;
+      background: var(--code-background-color, rgba(0, 0, 0, 0.04));
+      border-radius: 6px;
+      font-size: 0.78em;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .compare-col.refined pre {
+      border-left: 3px solid var(--success-color, #4caf50);
+    }
+    @media (max-width: 720px) {
+      .compare {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Follow-up feedback for re-refine */
+    .feedback {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border: 1px dashed var(--divider-color, rgba(0, 0, 0, 0.2));
+      border-radius: 6px;
+    }
+    .feedback h5 {
+      margin: 0 0 6px;
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+    }
+    .feedback textarea {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 56px;
+      padding: 6px 8px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
+      border-radius: 4px;
+      font: inherit;
+      background: var(--card-background-color, white);
+      color: var(--primary-text-color);
+      resize: vertical;
+    }
+    .feedback textarea:focus {
+      outline: none;
+      border-color: var(--primary-color);
+    }
 
     /* Rename inputs */
     .rename {
@@ -806,10 +872,14 @@ export class HaInsightsCard extends LitElement {
     this._refineBusy = true;
     this._modalError = undefined;
     try {
-      const result = await this.hass.connection.sendMessagePromise<RefineResult>({
+      const message: Record<string, unknown> = {
         type: "home_insights/refine",
         insight_id: insight.id,
-      });
+      };
+      const feedback = (this._feedbackById.get(insight.id) ?? "").trim();
+      if (feedback) message.feedback = feedback;
+      const result =
+        await this.hass.connection.sendMessagePromise<RefineResult>(message);
       const next = new Map(this._refinedById);
       next.set(insight.id, {
         payload: result.refined_payload,
@@ -817,6 +887,11 @@ export class HaInsightsCard extends LitElement {
         diffSummary: result.diff_summary,
       });
       this._refinedById = next;
+      // Clear the feedback once the LLM has consumed it; the user can type
+      // fresh notes for the next refine pass.
+      const nextFb = new Map(this._feedbackById);
+      nextFb.delete(insight.id);
+      this._feedbackById = nextFb;
       this._toast = result.diff_summary.length > 0
         ? `Refined: ${result.diff_summary.length} change(s) proposed`
         : "Refined: no changes proposed";
@@ -1097,6 +1172,7 @@ export class HaInsightsCard extends LitElement {
 
   private _renderRefinedPreview(insight: Insight, refined: RefinedState): TemplateResult {
     const busy = this._busyId === insight.id;
+    const feedback = this._feedbackById.get(insight.id) ?? "";
     return html`
       <div class="refined-banner">
         <strong>✨ Refined version proposed</strong>
@@ -1107,9 +1183,32 @@ export class HaInsightsCard extends LitElement {
               No top-level changes detected.
             </div>`}
       </div>
-      <h4>Refined automation</h4>
-      <pre>${JSON.stringify(refined.payload, null, 2)}</pre>
+      <h4>Original vs refined</h4>
+      <div class="compare">
+        <div class="compare-col">
+          <h5>Original</h5>
+          <pre>${JSON.stringify(insight.payload, null, 2)}</pre>
+        </div>
+        <div class="compare-col refined">
+          <h5>Refined</h5>
+          <pre>${JSON.stringify(refined.payload, null, 2)}</pre>
+        </div>
+      </div>
       ${this._renderRename(insight, refined)}
+      <div class="feedback">
+        <h5>Ask the LLM for further changes</h5>
+        <textarea
+          placeholder="e.g. Add a sun.below_horizon condition; change debounce to 10s"
+          .value=${feedback}
+          @input=${(e: Event) => {
+            const value = (e.target as HTMLTextAreaElement).value;
+            const next = new Map(this._feedbackById);
+            if (value) next.set(insight.id, value);
+            else next.delete(insight.id);
+            this._feedbackById = next;
+          }}
+        ></textarea>
+      </div>
       <div class="explain-row">
         <button
           class="action"
