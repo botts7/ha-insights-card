@@ -42,6 +42,8 @@ export class HaInsightsCard extends LitElement {
   @state() private _testBusy = false;
   /** Per-insight refined preview held in card state until Apply or Keep Original. */
   @state() private _refinedById = new Map<string, RefinedState>();
+  /** Per-insight alias/description rename edits, applied as payload_override on Apply. */
+  @state() private _renameEdits = new Map<string, { alias?: string; description?: string }>();
   /** Latest test_actions result, shown as an inline panel in the dialog. */
   @state() private _testResults?: { ran: number; error_count: number; results: TestActionsResult["results"]; tested: "original" | "refined" };
 
@@ -307,6 +309,45 @@ export class HaInsightsCard extends LitElement {
     .diff-remove { color: var(--error-color, #c62828); }
     .diff-change { color: var(--warning-color, #ef6c00); }
 
+    /* Rename inputs */
+    .rename {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      border-radius: 6px;
+    }
+    .rename h4 {
+      margin: 0 0 8px;
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+    }
+    .rename label {
+      display: block;
+      font-size: 0.78em;
+      color: var(--secondary-text-color);
+      margin: 6px 0 2px;
+    }
+    .rename input,
+    .rename textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 8px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
+      border-radius: 4px;
+      font: inherit;
+      background: var(--card-background-color, white);
+      color: var(--primary-text-color);
+    }
+    .rename textarea {
+      resize: vertical;
+      min-height: 48px;
+    }
+    .rename input:focus,
+    .rename textarea:focus {
+      outline: none;
+      border-color: var(--primary-color);
+    }
+
     /* Test-actions result panel */
     .test-results {
       margin-bottom: 12px;
@@ -485,24 +526,80 @@ export class HaInsightsCard extends LitElement {
     if (this._dialogId === id) this._closeDialog();
   }
 
-  private async _apply(insight: Insight, override?: Record<string, unknown>): Promise<void> {
+  private async _apply(insight: Insight, refinedPayload?: Record<string, unknown>): Promise<void> {
     if (!this.hass) return;
     this._busyId = insight.id;
     try {
-      const payload: Record<string, unknown> = {
+      // Build the effective payload: refined (if any) merged with any rename edits
+      const basePayload = refinedPayload ?? insight.payload;
+      const edits = this._renameEdits.get(insight.id);
+      const renamed = edits && (edits.alias !== undefined || edits.description !== undefined);
+      const override: Record<string, unknown> | undefined =
+        refinedPayload || renamed
+          ? { ...basePayload, ...(edits ?? {}) }
+          : undefined;
+
+      const message: Record<string, unknown> = {
         type: "home_insights/apply",
         insight_id: insight.id,
       };
-      if (override) payload.payload_override = override;
-      await this.hass.connection.sendMessagePromise(payload);
+      if (override) message.payload_override = override;
+      await this.hass.connection.sendMessagePromise(message);
+
+      // Cleanup local state
       this._refinedById.delete(insight.id);
+      this._renameEdits.delete(insight.id);
       this._removeFromList(insight.id);
-      this._toast = override ? `Applied refined: ${insight.title}` : `Applied: ${insight.title}`;
+
+      const label = refinedPayload
+        ? "Applied refined"
+        : renamed
+          ? "Applied (renamed)"
+          : "Applied";
+      this._toast = `${label}: ${insight.title}`;
     } catch (err) {
       this._error = `Apply failed: ${this._asMessage(err)}`;
     } finally {
       this._busyId = undefined;
     }
+  }
+
+  private _onRenameField(
+    insightId: string,
+    field: "alias" | "description",
+    e: Event,
+  ): void {
+    const value = (e.target as HTMLInputElement | HTMLTextAreaElement).value;
+    const next = new Map(this._renameEdits);
+    const entry = { ...(next.get(insightId) ?? {}) };
+    entry[field] = value;
+    next.set(insightId, entry);
+    this._renameEdits = next;
+  }
+
+  private _renderRename(insight: Insight, refined: RefinedState | undefined): TemplateResult {
+    const base = refined?.payload ?? insight.payload;
+    const edits = this._renameEdits.get(insight.id) ?? {};
+    const alias = edits.alias ?? (base.alias as string | undefined) ?? "";
+    const description = edits.description ?? (base.description as string | undefined) ?? "";
+    return html`
+      <div class="rename">
+        <h4>Customize</h4>
+        <label for="ha-insights-alias-${insight.id}">Alias</label>
+        <input
+          id="ha-insights-alias-${insight.id}"
+          type="text"
+          .value=${alias}
+          @input=${(e: Event) => this._onRenameField(insight.id, "alias", e)}
+        />
+        <label for="ha-insights-desc-${insight.id}">Description</label>
+        <textarea
+          id="ha-insights-desc-${insight.id}"
+          .value=${description}
+          @input=${(e: Event) => this._onRenameField(insight.id, "description", e)}
+        ></textarea>
+      </div>
+    `;
   }
 
   private async _dismiss(insight: Insight): Promise<void> {
@@ -720,6 +817,12 @@ export class HaInsightsCard extends LitElement {
   }
 
   private _closeDialog(): void {
+    if (this._dialogId) {
+      // Discard rename edits when the modal closes without applying.
+      const next = new Map(this._renameEdits);
+      next.delete(this._dialogId);
+      this._renameEdits = next;
+    }
     this._dialogId = undefined;
     this._testResults = undefined;
   }
@@ -810,6 +913,7 @@ export class HaInsightsCard extends LitElement {
       </div>
       <h4>Refined automation</h4>
       <pre>${JSON.stringify(refined.payload, null, 2)}</pre>
+      ${this._renderRename(insight, refined)}
       <div class="explain-row">
         <button
           class="action"
@@ -886,6 +990,7 @@ export class HaInsightsCard extends LitElement {
                   ${insight.explanation
                     ? html`<div class="explanation">${insight.explanation}</div>`
                     : nothing}
+                  ${this._renderRename(insight, undefined)}
                   <div class="explain-row">
                     ${llmEnabled && !insight.explanation
                       ? html`
