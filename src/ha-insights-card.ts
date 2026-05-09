@@ -1004,7 +1004,10 @@ export class HaInsightsCard extends LitElement {
     }
   }
 
-  private _togglePayloadEdit(insight: Insight): void {
+  private _togglePayloadEdit(
+    insight: Insight,
+    basePayload?: Record<string, unknown>,
+  ): void {
     const editing = new Set(this._editingPayloadFor);
     if (editing.has(insight.id)) {
       editing.delete(insight.id);
@@ -1017,9 +1020,11 @@ export class HaInsightsCard extends LitElement {
       this._payloadParseErrorById = errs;
     } else {
       editing.add(insight.id);
-      // Seed the editor with the current pretty-printed JSON
+      // Seed from the base payload the user is currently looking at:
+      // refined when in refined-preview view, else the original.
+      const seed = basePayload ?? insight.payload;
       const drafts = new Map(this._payloadEditsById);
-      drafts.set(insight.id, JSON.stringify(insight.payload, null, 2));
+      drafts.set(insight.id, JSON.stringify(seed, null, 2));
       this._payloadEditsById = drafts;
     }
     this._editingPayloadFor = editing;
@@ -1345,16 +1350,20 @@ export class HaInsightsCard extends LitElement {
     this._testResults = undefined;
   }
 
-  private _renderPayloadView(insight: Insight): TemplateResult {
+  private _renderPayloadView(
+    insight: Insight,
+    basePayload?: Record<string, unknown>,
+  ): TemplateResult {
     const editing = this._editingPayloadFor.has(insight.id);
     const draft = this._payloadEditsById.get(insight.id);
     const parseError = this._payloadParseErrorById.get(insight.id);
+    const view = basePayload ?? insight.payload;
     return html`
       <div class="payload-edit">
         <button
-          @click=${() => this._togglePayloadEdit(insight)}
+          @click=${() => this._togglePayloadEdit(insight, basePayload)}
           title=${editing
-            ? "Discard edits and revert to the detected payload"
+            ? "Discard edits and revert"
             : "Edit the payload as JSON before Apply"}
         >
           ${editing ? "✕ Cancel edit" : "✎ Edit"}
@@ -1365,14 +1374,14 @@ export class HaInsightsCard extends LitElement {
             <textarea
               class="payload-editor ${parseError ? "error" : ""}"
               spellcheck="false"
-              .value=${draft ?? JSON.stringify(insight.payload, null, 2)}
+              .value=${draft ?? JSON.stringify(view, null, 2)}
               @input=${(e: Event) => this._onPayloadEditInput(insight.id, e)}
             ></textarea>
             ${parseError
               ? html`<div class="payload-error">${parseError}</div>`
               : nothing}
           `
-        : html`<pre>${JSON.stringify(insight.payload, null, 2)}</pre>`}
+        : html`<pre>${JSON.stringify(view, null, 2)}</pre>`}
     `;
   }
 
@@ -1764,6 +1773,8 @@ export class HaInsightsCard extends LitElement {
           <pre>${JSON.stringify(refined.payload, null, 2)}</pre>
         </div>
       </div>
+      <h4>Edit refined before Apply</h4>
+      ${this._renderPayloadView(insight, refined.payload)}
       ${this._renderPreview(insight)}
       ${this._renderRename(insight, refined)}
       ${this._renderFeedbackInput(insight, "Ask the LLM for further changes")}
