@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.0] — 2026-05-09
+
+UX polish to scale with the new detector library — color coding, age, sort, group.
+
+### Added
+
+- **Confidence color coding** on the row pill: green ≥0.8, amber ≥0.5, red below. Quick triage at a glance.
+- **Insight age display** — new pill shows relative time since the insight was created: `12m ago`, `3h ago`, `yesterday`, `2d ago`, `1w ago`. Hidden for very fresh insights (<5min) to avoid clutter on brand-new rows. Hover shows the absolute ISO timestamp.
+- **Sort by** dropdown in the panel filter row: **Confidence** (default), **Newest**, **Detector** name.
+- **Group by** dropdown: **None** (default), **Detector**, **Area**. Section headers render above each bucket with the group key + count.
+- New `CardConfig.sort_by` and `CardConfig.group_by` fields so the dashboard card can also be configured with fixed sort/group via YAML or the visual editor.
+
+### Changed
+
+- `card_version` handshake bumped to `0.7.0`.
+
 ## [0.6.0] — 2026-05-09
 
 Card UX for v0.6.0's trust & visibility work.
