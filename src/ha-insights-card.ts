@@ -1170,7 +1170,23 @@ export class HaInsightsCard extends LitElement {
         ? `Refined: ${result.diff_summary.length} change(s) proposed`
         : "Refined: no changes proposed";
     } catch (err) {
-      this._failModal(`Refine failed: ${this._asMessage(err)}`);
+      const message = this._asMessage(err);
+      // If validation rejected the refinement because the LLM added an
+      // entity not in the original, auto-populate the feedback box with a
+      // constraint hint so the user can click Refine again to retry. The
+      // hint references the original payload's entity_ids only.
+      const hint = this._buildConstraintHint(insight, message);
+      if (hint) {
+        const fb = new Map(this._feedbackById);
+        fb.set(insight.id, hint);
+        this._feedbackById = fb;
+        this._failModal(
+          `${message}\n\n→ A constraint hint has been added below. ` +
+          "Click ✨ Refine again to retry with that hint.",
+        );
+      } else {
+        this._failModal(`Refine failed: ${message}`);
+      }
     } finally {
       this._refineBusy = false;
     }
@@ -1242,6 +1258,55 @@ export class HaInsightsCard extends LitElement {
           : nothing}
       </div>
     `;
+  }
+
+  /**
+   * Detect the "hallucinated entity" validation failure pattern and build
+   * a constraint hint that names the legal entity_ids from the original
+   * payload. Returns null for any other error so the user just sees the
+   * raw refine_failed message.
+   */
+  private _buildConstraintHint(insight: Insight, errorMessage: string): string | null {
+    if (!/references entities not in the original/i.test(errorMessage)) {
+      return null;
+    }
+    const allowed = this._collectEntityIds(insight.payload);
+    if (allowed.length === 0) return null;
+    return (
+      `Use ONLY these entity_ids: ${allowed.join(", ")}. `
+      + "Do not introduce any new entities. "
+      + "Adding new services (e.g. light.turn_off) on the existing "
+      + "entities is fine."
+    );
+  }
+
+  /**
+   * Mirror of the server-side _collect_entity_ids: walk the payload and
+   * gather entity_id values from `entity_id` / `entity_ids` fields only.
+   */
+  private _collectEntityIds(value: unknown, inEntityField = false): string[] {
+    if (value == null) return [];
+    if (typeof value === "string") {
+      if (!inEntityField) return [];
+      const matches = value.match(/\b[a-z_]+\.[a-z0-9_]+\b/g) ?? [];
+      return matches;
+    }
+    if (Array.isArray(value)) {
+      const out: string[] = [];
+      for (const item of value) {
+        out.push(...this._collectEntityIds(item, inEntityField));
+      }
+      return Array.from(new Set(out));
+    }
+    if (typeof value === "object") {
+      const out: string[] = [];
+      for (const [key, sub] of Object.entries(value as Record<string, unknown>)) {
+        const nestedInEntityField = inEntityField || key === "entity_id" || key === "entity_ids";
+        out.push(...this._collectEntityIds(sub, nestedInEntityField));
+      }
+      return Array.from(new Set(out));
+    }
+    return [];
   }
 
   private _keepOriginal(insightId: string): void {
