@@ -427,7 +427,7 @@ export class HaInsightsCard extends LitElement {
     try {
       this._hello = await this.hass.connection.sendMessagePromise<HelloResult>({
         type: "home_insights/hello",
-        card_version: "0.3.0-dev",
+        card_version: "0.3.0",
       });
     } catch (err) {
       this._error = `Integration not reachable: ${this._asMessage(err)}`;

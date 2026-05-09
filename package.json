@@ -1,6 +1,6 @@
 {
   "name": "ha-insights-card",
-  "version": "0.1.0-dev",
+  "version": "0.3.0",
   "description": "Lovelace card for HA Insights",
   "main": "dist/ha-insights-card.js",
   "scripts": {
