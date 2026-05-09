@@ -9,6 +9,7 @@
 import { LitElement, html, css, nothing, type TemplateResult, type PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
+import "./ha-insights-card-editor";
 import type {
   BackfillStatus,
   CardConfig,
@@ -486,6 +487,19 @@ export class HaInsightsCard extends LitElement {
 
   getCardSize(): number {
     return Math.min(this._insights.length, this._config.max_rows ?? DEFAULT_MAX_ROWS) + 2;
+  }
+
+  /** Lovelace hook — return a visual editor for Edit Card UI. */
+  public static async getConfigElement(): Promise<HTMLElement> {
+    return document.createElement("ha-insights-card-editor");
+  }
+
+  /** Lovelace hook — sensible defaults when the user adds a fresh card. */
+  public static getStubConfig(): Partial<CardConfig> {
+    return {
+      title: "HA Insights",
+      min_confidence: 0.5,
+    };
   }
 
   connectedCallback(): void {
