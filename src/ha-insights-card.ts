@@ -49,6 +49,12 @@ export class HaInsightsCard extends LitElement {
   /** v0.9 phase 6: ephemeral hypothesis text per anomaly id. Not persisted. */
   @state() private _hypothesisById = new Map<string, string>();
   @state() private _hypothesizeBusy = false;
+  /** v1.0 RC #2: per-insight Conversation API thread id, so consecutive
+   * Refines on the same insight maintain agent context. Cleared on
+   * Apply / Keep Original / explicit "Reset conversation". */
+  @state() private _refineConversationById = new Map<string, string>();
+  /** v1.0 RC #2: per-insight Refine turn counter for UI display. */
+  @state() private _refineTurnsById = new Map<string, number>();
   @state() private _testBusy = false;
   @state() private _scanBusy = false;
   /** Per-insight refined preview held in card state until Apply or Keep Original. */
@@ -1040,6 +1046,7 @@ export class HaInsightsCard extends LitElement {
       // Cleanup local state
       this._refinedById.delete(insight.id);
       this._renameEdits.delete(insight.id);
+      this._resetRefineConversation(insight.id);
       this._removeFromList(insight.id);
 
       const label = editedPayload
@@ -1278,8 +1285,22 @@ export class HaInsightsCard extends LitElement {
         insight_id: insight.id,
       };
       if (feedback) message.feedback = feedback;
+      // Thread the prior conversation_id (if any) so the agent retains
+      // context across turns. Server failover automatically drops it
+      // when falling over to a different agent.
+      const prior = this._refineConversationById.get(insight.id);
+      if (prior) message.conversation_id = prior;
       const result =
         await this.hass.connection.sendMessagePromise<RefineResult>(message);
+      // Capture the new (or echoed) conversation_id for the next turn.
+      if (result.conversation_id) {
+        const nextConv = new Map(this._refineConversationById);
+        nextConv.set(insight.id, result.conversation_id);
+        this._refineConversationById = nextConv;
+      }
+      const nextTurns = new Map(this._refineTurnsById);
+      nextTurns.set(insight.id, (nextTurns.get(insight.id) ?? 0) + 1);
+      this._refineTurnsById = nextTurns;
       const next = new Map(this._refinedById);
       next.set(insight.id, {
         payload: result.refined_payload,
@@ -1439,7 +1460,22 @@ export class HaInsightsCard extends LitElement {
     const next = new Map(this._refinedById);
     next.delete(insightId);
     this._refinedById = next;
+    this._resetRefineConversation(insightId);
     this._toast = "Kept original";
+  }
+
+  /** v1.0 RC #2: clear the multi-turn refine context for an insight. */
+  private _resetRefineConversation(insightId: string): void {
+    if (this._refineConversationById.has(insightId)) {
+      const next = new Map(this._refineConversationById);
+      next.delete(insightId);
+      this._refineConversationById = next;
+    }
+    if (this._refineTurnsById.has(insightId)) {
+      const next = new Map(this._refineTurnsById);
+      next.delete(insightId);
+      this._refineTurnsById = next;
+    }
   }
 
   private async _testActions(insight: Insight, override?: Record<string, unknown>): Promise<void> {
@@ -1905,7 +1941,9 @@ export class HaInsightsCard extends LitElement {
           ?disabled=${this._refineBusy}
           @click=${() => this._refine(insight)}
         >
-          ${this._refineBusy ? "💭 refining…" : "Refine again"}
+          ${this._refineBusy
+            ? "💭 refining…"
+            : `Refine again (turn ${(this._refineTurnsById.get(insight.id) ?? 0) + 1})`}
         </button>
         <button
           class="action"
@@ -2008,11 +2046,29 @@ export class HaInsightsCard extends LitElement {
                           <button
                             class="action ${this._refineBusy ? "busy-pulse" : ""}"
                             ?disabled=${this._refineBusy}
-                            title="Ask the LLM to refine this automation"
+                            title="${this._refineConversationById.has(insight.id)
+                              ? "Continue the LLM conversation with new feedback"
+                              : "Ask the LLM to refine this automation"}"
                             @click=${() => this._refine(insight)}
                           >
-                            ${this._refineBusy ? "💭 refining…" : "✨ Refine with LLM"}
+                            ${this._refineBusy
+                              ? "💭 refining…"
+                              : this._refineConversationById.has(insight.id)
+                                ? `✨ Refine again (turn ${(this._refineTurnsById.get(insight.id) ?? 0) + 1})`
+                                : "✨ Refine with LLM"}
                           </button>
+                          ${this._refineConversationById.has(insight.id)
+                            ? html`<button
+                                class="action"
+                                title="Forget the prior conversation and start a fresh refine thread"
+                                @click=${() => {
+                                  this._resetRefineConversation(insight.id);
+                                  this._toast = "Refine conversation reset";
+                                }}
+                              >
+                                🔁 Reset conversation
+                              </button>`
+                            : nothing}
                           <button
                             class="action"
                             ?disabled=${this._previewBusy}

@@ -61,6 +61,10 @@ export interface RefineResult {
   diff_summary: string[];
   bytes_sent: number;
   bytes_received: number;
+  /** v1.0 RC #2: HA conversation_id from Conversation API. Threading
+   * this back on follow-up Refines turns the exchange into a multi-turn
+   * dialogue. Null when the agent didn't return one. */
+  conversation_id?: string | null;
 }
 
 export interface TestActionsResult {
