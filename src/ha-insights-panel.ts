@@ -38,6 +38,9 @@ export class HaInsightsPanel extends LitElement {
   @state() private _auditLog: AuditLogCall[] = [];
   @state() private _auditBusy = false;
   private _toastTimer?: number;
+  // Persistent filter storage (v0.8 phase 6). Versioned key so future
+  // shape changes can ignore old saved state cleanly.
+  private static readonly _STORAGE_KEY = "ha-insights-panel-filters-v1";
 
   static styles = css`
     :host {
@@ -230,6 +233,54 @@ export class HaInsightsPanel extends LitElement {
       }
     }
   `;
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    this._loadFilters();
+  }
+
+  protected updated(): void {
+    // Save on any filter change. Cheap (<1 KB stringify) and synchronous.
+    this._saveFilters();
+  }
+
+  private _loadFilters(): void {
+    try {
+      const raw = window.localStorage.getItem(HaInsightsPanel._STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (typeof saved.search === "string") this._search = saved.search;
+      if (typeof saved.minConfidence === "number") {
+        this._minConfidence = saved.minConfidence;
+      }
+      if (saved.sortBy === "confidence" || saved.sortBy === "age" || saved.sortBy === "detector") {
+        this._sortBy = saved.sortBy;
+      }
+      if (saved.groupBy === "none" || saved.groupBy === "detector" || saved.groupBy === "area") {
+        this._groupBy = saved.groupBy;
+      }
+      if (typeof saved.auditOpen === "boolean") this._auditOpen = saved.auditOpen;
+    } catch {
+      // Corrupted localStorage entry; fall back to defaults.
+    }
+  }
+
+  private _saveFilters(): void {
+    try {
+      window.localStorage.setItem(
+        HaInsightsPanel._STORAGE_KEY,
+        JSON.stringify({
+          search: this._search,
+          minConfidence: this._minConfidence,
+          sortBy: this._sortBy,
+          groupBy: this._groupBy,
+          auditOpen: this._auditOpen,
+        }),
+      );
+    } catch {
+      // Quota / private mode; non-fatal
+    }
+  }
 
   private _onSearch(e: Event): void {
     this._search = (e.target as HTMLInputElement).value;

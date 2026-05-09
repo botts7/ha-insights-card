@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.2] — 2026-05-10
+
+UX polish + recovery flows for the apply pipeline.
+
+### Added
+
+- **Edit refined before Apply** — `_renderPayloadView` now accepts an optional `basePayload`, and `_togglePayloadEdit` seeds the textarea from whichever payload the user is currently looking at. The refined-preview view gains an "Edit refined before Apply" section so users can tweak the LLM's output before applying. Apply already prefers `editedPayload` over `refinedPayload` when both are present, so no changes were needed in the apply path.
+- **Constraint-hint auto-fill** — when refine fails with a "references entities not in the original" validation error, the card mirrors the server's `_collect_entity_ids` walk on the original payload (entity_id / entity_ids fields only), auto-populates the feedback textarea with `"Use ONLY these entity_ids: [list]. Do not introduce any new entities. Adding new services on the existing entities is fine."`, and points the user there via the modal error message. Click ✨ Refine again to retry with the constraint applied.
+- **Empty state CTA** — when the card has no insights to show, the empty body now exposes a `🔍 Run scan now` button (calls `ha_insights.scan_now` + refreshes the list) and a `How it works ↗` link to the project README.
+- **Persistent panel filters** — the panel's search, min-confidence, sort-by, group-by, and audit-open state save to `localStorage` (versioned key `ha-insights-panel-filters-v1`) and restore on connect, so re-opening the panel preserves the user's triage view.
+
+### Changed
+
+- `card_version` handshake bumped to `0.8.2`.
+
 ## [0.8.1] — 2026-05-10
 
 Three apply-flow polish items.

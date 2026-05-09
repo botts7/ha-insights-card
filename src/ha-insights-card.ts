@@ -47,6 +47,7 @@ export class HaInsightsCard extends LitElement {
   @state() private _ttsBusy = false;
   @state() private _refineBusy = false;
   @state() private _testBusy = false;
+  @state() private _scanBusy = false;
   /** Per-insight refined preview held in card state until Apply or Keep Original. */
   @state() private _refinedById = new Map<string, RefinedState>();
   /** Per-insight alias/description rename edits, applied as payload_override on Apply. */
@@ -159,6 +160,33 @@ export class HaInsightsCard extends LitElement {
       padding: 24px 16px;
       text-align: center;
       color: var(--secondary-text-color);
+    }
+    .empty-actions {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .empty-actions a,
+    .empty-actions button {
+      background: none;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
+      color: var(--primary-text-color);
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.9em;
+      text-decoration: none;
+    }
+    .empty-actions a:hover,
+    .empty-actions button:hover:not(:disabled) {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+    }
+    .empty-actions button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
     .error {
       color: var(--error-color, #f44336);
@@ -786,7 +814,7 @@ export class HaInsightsCard extends LitElement {
     try {
       this._hello = await this.hass.connection.sendMessagePromise<HelloResult>({
         type: "home_insights/hello",
-        card_version: "0.8.1",
+        card_version: "0.8.2",
       });
     } catch (err) {
       this._error = `Integration not reachable: ${this._asMessage(err)}`;
@@ -885,6 +913,36 @@ export class HaInsightsCard extends LitElement {
   private _removeFromList(id: string): void {
     this._insights = this._insights.filter((i) => i.id !== id);
     if (this._dialogId === id) this._closeDialog();
+  }
+
+  private async _runScanNow(): Promise<void> {
+    if (!this.hass) return;
+    this._scanBusy = true;
+    try {
+      await this.hass.connection.sendMessagePromise({
+        type: "call_service",
+        domain: "ha_insights",
+        service: "scan_now",
+        service_data: {},
+      });
+      this._toast = "Scan complete";
+      // Refresh the list so any new insights show up immediately
+      try {
+        const result = await this.hass.connection.sendMessagePromise<{
+          insights: Insight[];
+        }>({
+          type: "home_insights/list",
+          include_applied: Boolean(this._config.include_applied),
+        });
+        this._insights = result.insights ?? [];
+      } catch {
+        // Subscribe events will eventually catch up; non-fatal
+      }
+    } catch (err) {
+      this._error = `Scan failed: ${this._asMessage(err)}`;
+    } finally {
+      this._scanBusy = false;
+    }
   }
 
   private async _undo(insight: Insight, force = false): Promise<void> {
@@ -2001,7 +2059,24 @@ export class HaInsightsCard extends LitElement {
         ${this._toast ? html`<div class="toast">${this._toast}</div>` : nothing}
         ${rows.length === 0
           ? html`<div class="empty">
-              Watching your home. New insights appear here as patterns emerge.
+              <div>Watching your home. New insights appear here as patterns emerge.</div>
+              <div class="empty-actions">
+                <button
+                  ?disabled=${this._scanBusy}
+                  @click=${this._runScanNow}
+                  title="Run all detectors against the current state buffer"
+                >
+                  ${this._scanBusy ? "Scanning…" : "🔍 Run scan now"}
+                </button>
+                <a
+                  href="https://github.com/botts7/ha-insights"
+                  target="_blank"
+                  rel="noopener"
+                  title="Open the project README"
+                >
+                  How it works ↗
+                </a>
+              </div>
             </div>`
           : this._grouped(rows).flatMap(([key, items]) =>
               key
