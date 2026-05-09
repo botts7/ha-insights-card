@@ -10,9 +10,11 @@ import { customElement, property, state } from "lit/decorators.js";
 
 import type {
   CardConfig,
+  ExplainResult,
   HassLite,
   HelloResult,
   Insight,
+  PrivacyMode,
   SubscribeEvent,
 } from "./types";
 
@@ -29,6 +31,8 @@ export class HaInsightsCard extends LitElement {
   @state() private _loading = true;
   @state() private _busyId?: string;
   @state() private _toast?: string;
+  @state() private _expandedId?: string;
+  @state() private _explainBusy = false;
 
   private _unsub?: () => void;
   private _toastTimer?: number;
@@ -75,6 +79,62 @@ export class HaInsightsCard extends LitElement {
       color: white;
       padding: 8px 16px;
       font-size: 0.85em;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.75em;
+      font-weight: 500;
+      vertical-align: middle;
+    }
+    .badge-off {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.08));
+      color: var(--secondary-text-color);
+    }
+    .badge-local {
+      background: rgba(76, 175, 80, 0.18);
+      color: var(--success-color, #2e7d32);
+    }
+    .badge-cloud {
+      background: rgba(255, 152, 0, 0.18);
+      color: var(--warning-color, #e65100);
+    }
+    .row.expanded {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.02));
+    }
+    .row-header {
+      cursor: pointer;
+    }
+    .detail {
+      margin-top: 8px;
+      padding: 12px;
+      background: var(--card-background-color, white);
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      border-radius: 6px;
+      font-size: 0.85em;
+    }
+    .detail h4 {
+      margin: 0 0 8px;
+      font-size: 0.9em;
+    }
+    .detail pre {
+      background: var(--code-background-color, rgba(0, 0, 0, 0.04));
+      padding: 8px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 0.85em;
+      line-height: 1.4;
+    }
+    .explanation {
+      margin-top: 12px;
+      padding: 12px;
+      border-left: 3px solid var(--primary-color);
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.02));
+      font-style: italic;
+      line-height: 1.5;
     }
     .row {
       padding: 12px 16px;
@@ -294,6 +354,17 @@ export class HaInsightsCard extends LitElement {
       .slice(0, max);
   }
 
+  private _renderModeBadge(mode: PrivacyMode | undefined): TemplateResult | typeof nothing {
+    if (!mode) return nothing;
+    const cls = `badge badge-${mode}`;
+    const label = mode === "off"
+      ? "🚫 Off"
+      : mode === "local"
+        ? "🟢 Local"
+        : "🟡 Cloud";
+    return html`<span class=${cls} title="Privacy mode: ${mode}">${label}</span>`;
+  }
+
   private _renderHeader(): TemplateResult {
     const title = this._config.title ?? "HA Insights";
     const sub = this._hello
@@ -301,7 +372,9 @@ export class HaInsightsCard extends LitElement {
       : "connecting…";
     return html`
       <div class="header">
-        <div class="title">${title}</div>
+        <div class="title">
+          ${title} ${this._renderModeBadge(this._hello?.privacy_mode)}
+        </div>
         <div class="subtitle">${sub}</div>
       </div>
     `;
@@ -318,21 +391,78 @@ export class HaInsightsCard extends LitElement {
     `;
   }
 
+  private _toggleExpanded(insightId: string): void {
+    this._expandedId = this._expandedId === insightId ? undefined : insightId;
+  }
+
+  private async _explain(insight: Insight): Promise<void> {
+    if (!this.hass) return;
+    this._explainBusy = true;
+    try {
+      const result = await this.hass.connection.sendMessagePromise<ExplainResult>({
+        type: "home_insights/explain",
+        insight_id: insight.id,
+      });
+      // Update the local copy with the explanation
+      this._insights = this._insights.map((i) =>
+        i.id === insight.id ? { ...i, explanation: result.explanation } : i,
+      );
+    } catch (err) {
+      this._error = `Explain failed: ${this._asMessage(err)}`;
+    } finally {
+      this._explainBusy = false;
+    }
+  }
+
+  private _renderDetail(insight: Insight): TemplateResult {
+    const llmEnabled = this._hello?.privacy_mode && this._hello.privacy_mode !== "off";
+    return html`
+      <div class="detail" @click=${(e: Event) => e.stopPropagation()}>
+        <h4>Automation that would be created</h4>
+        <pre>${JSON.stringify(insight.payload, null, 2)}</pre>
+        ${insight.explanation
+          ? html`<div class="explanation">${insight.explanation}</div>`
+          : nothing}
+        ${llmEnabled && !insight.explanation
+          ? html`
+              <button
+                class="action"
+                ?disabled=${this._explainBusy}
+                @click=${() => this._explain(insight)}
+                style="margin-top: 12px;"
+              >
+                ${this._explainBusy ? "asking LLM…" : "Explain with LLM"}
+              </button>
+            `
+          : nothing}
+        ${!llmEnabled
+          ? html`<div class="subtitle" style="margin-top: 12px;">
+              LLM Explain disabled — enable Local or Cloud mode in Settings → Devices & Services.
+            </div>`
+          : nothing}
+      </div>
+    `;
+  }
+
   private _renderRow(insight: Insight): TemplateResult {
     const busy = this._busyId === insight.id;
     const confidencePct = Math.round(insight.confidence * 100);
+    const expanded = this._expandedId === insight.id;
     return html`
-      <div class="row">
-        <div class="row-title">${insight.title}</div>
-        <div class="row-meta">
-          <span class="pill">confidence ${confidencePct}%</span>
-          <span class="pill">${insight.detector}</span>
-          ${insight.area_id ? html`<span class="pill">${insight.area_id}</span>` : nothing}
-          ${insight.conflicts_with.length > 0
-            ? html`<span class="pill" style="color: var(--warning-color)">conflicts</span>`
-            : nothing}
+      <div class="row ${expanded ? "expanded" : ""}">
+        <div class="row-header" @click=${() => this._toggleExpanded(insight.id)}>
+          <div class="row-title">${insight.title}</div>
+          <div class="row-meta">
+            <span class="pill">confidence ${confidencePct}%</span>
+            <span class="pill">${insight.detector}</span>
+            ${insight.area_id ? html`<span class="pill">${insight.area_id}</span>` : nothing}
+            ${insight.conflicts_with.length > 0
+              ? html`<span class="pill" style="color: var(--warning-color)">conflicts</span>`
+              : nothing}
+            <span class="pill">${expanded ? "▾" : "▸"}</span>
+          </div>
         </div>
-        <div class="row-actions">
+        <div class="row-actions" @click=${(e: Event) => e.stopPropagation()}>
           <button class="action primary" ?disabled=${busy} @click=${() => this._apply(insight)}>
             ${busy ? "applying…" : "Apply"}
           </button>
@@ -343,6 +473,7 @@ export class HaInsightsCard extends LitElement {
             Dismiss
           </button>
         </div>
+        ${expanded ? this._renderDetail(insight) : nothing}
       </div>
     `;
   }
