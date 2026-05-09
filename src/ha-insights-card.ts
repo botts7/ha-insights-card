@@ -208,6 +208,16 @@ export class HaInsightsCard extends LitElement {
       background: rgba(255, 152, 0, 0.18);
       color: var(--warning-color, #e65100);
     }
+    /* Group section header (v0.7) */
+    .group-header {
+      padding: 10px 16px 4px;
+      font-size: 0.78em;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--secondary-text-color);
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.02));
+      border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.06));
+    }
     .row {
       padding: 12px 16px;
       border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
@@ -237,6 +247,19 @@ export class HaInsightsCard extends LitElement {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
       padding: 2px 8px;
       border-radius: 10px;
+    }
+    /* Confidence pill color coding (v0.7) */
+    .pill.confidence-high {
+      background: rgba(76, 175, 80, 0.18);
+      color: var(--success-color, #2e7d32);
+    }
+    .pill.confidence-medium {
+      background: rgba(255, 152, 0, 0.18);
+      color: var(--warning-color, #e65100);
+    }
+    .pill.confidence-low {
+      background: rgba(244, 67, 54, 0.15);
+      color: var(--error-color, #c62828);
     }
     button.action {
       background: none;
@@ -1159,9 +1182,6 @@ export class HaInsightsCard extends LitElement {
 
   private _filtered(): Insight[] {
     const min = this._config.min_confidence ?? 0;
-    // Cap precedence: explicit max_rows in config > auto-fit measurement >
-    // hard-coded default. Lets the panel set max_rows: 9999 to disable
-    // auto-fit, while default-config cards adapt to their container.
     const userMax = this._config.max_rows;
     const cap =
       userMax !== undefined
@@ -1170,10 +1190,49 @@ export class HaInsightsCard extends LitElement {
           ? this._autoMaxRows
           : DEFAULT_MAX_ROWS;
     const search = (this._config.search ?? "").trim().toLowerCase();
-    return this._insights
+    const sortBy = this._config.sort_by ?? "confidence";
+    const filtered = this._insights
       .filter((i) => i.confidence >= min)
-      .filter((i) => !search || i.title.toLowerCase().includes(search))
-      .slice(0, cap);
+      .filter((i) => !search || i.title.toLowerCase().includes(search));
+
+    filtered.sort((a, b) => {
+      if (sortBy === "age") {
+        // Newest first
+        return (
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+      }
+      if (sortBy === "detector") {
+        const cmp = a.detector.localeCompare(b.detector);
+        return cmp !== 0 ? cmp : b.confidence - a.confidence;
+      }
+      // Default: confidence (high first)
+      return b.confidence - a.confidence;
+    });
+
+    return filtered.slice(0, cap);
+  }
+
+  /** Bucket insights by the configured group_by key. Returns ordered
+   *  pairs so the render can produce stable section ordering. */
+  private _grouped(rows: Insight[]): Array<[string, Insight[]]> {
+    const key = this._config.group_by ?? "none";
+    if (key === "none") return [["", rows]];
+    const buckets = new Map<string, Insight[]>();
+    for (const row of rows) {
+      const groupKey =
+        key === "area"
+          ? row.area_id ?? "(no area)"
+          : key === "detector"
+            ? row.detector
+            : "";
+      const existing = buckets.get(groupKey);
+      if (existing) existing.push(row);
+      else buckets.set(groupKey, [row]);
+    }
+    return Array.from(buckets.entries()).sort((a, b) =>
+      a[0].localeCompare(b[0]),
+    );
   }
 
   private _openDialog(insightId: string): void {
@@ -1258,14 +1317,19 @@ export class HaInsightsCard extends LitElement {
 
   private _renderRow(insight: Insight): TemplateResult {
     const confidencePct = Math.round(insight.confidence * 100);
+    const confidenceClass = this._confidenceClass(insight.confidence);
+    const ageLabel = this._formatAge(insight.created_at);
     return html`
       <div class="row" @click=${() => this._openDialog(insight.id)}>
         <div class="row-title">${insight.title}</div>
         <div class="row-meta">
-          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill ${confidenceClass}">confidence ${confidencePct}%</span>
           <span class="pill">${insight.detector}</span>
           ${insight.area_id ? html`<span class="pill">${insight.area_id}</span>` : nothing}
           ${this._renderTrustPill()}
+          ${ageLabel
+            ? html`<span class="pill" title=${insight.created_at}>${ageLabel}</span>`
+            : nothing}
           ${insight.conflicts_with.length > 0
             ? html`<span class="pill" style="color: var(--warning-color)">conflicts</span>`
             : nothing}
@@ -1275,6 +1339,35 @@ export class HaInsightsCard extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  private _confidenceClass(confidence: number): string {
+    if (confidence >= 0.8) return "confidence-high";
+    if (confidence >= 0.5) return "confidence-medium";
+    return "confidence-low";
+  }
+
+  /** Render insight.created_at as a relative-time pill ("3h ago" / "yesterday").
+   *  Returns "" for very fresh (<5min) so we don't clutter brand-new rows. */
+  private _formatAge(createdAt: string): string {
+    if (!createdAt) return "";
+    const created = new Date(createdAt).getTime();
+    if (Number.isNaN(created)) return "";
+    const seconds = Math.floor((Date.now() - created) / 1000);
+    if (seconds < 5 * 60) return "";
+    if (seconds < 60 * 60) {
+      const m = Math.floor(seconds / 60);
+      return `${m}m ago`;
+    }
+    if (seconds < 24 * 60 * 60) {
+      const h = Math.floor(seconds / 3600);
+      return `${h}h ago`;
+    }
+    const days = Math.floor(seconds / (24 * 60 * 60));
+    if (days === 1) return "yesterday";
+    if (days < 14) return `${days}d ago`;
+    const weeks = Math.floor(days / 7);
+    return `${weeks}w ago`;
   }
 
   /** Per-row trust indicator. Mirrors the header privacy mode but at row
@@ -1573,7 +1666,14 @@ export class HaInsightsCard extends LitElement {
           ? html`<div class="empty">
               Watching your home. New insights appear here as patterns emerge.
             </div>`
-          : rows.map((i) => this._renderRow(i))}
+          : this._grouped(rows).flatMap(([key, items]) =>
+              key
+                ? [
+                    html`<div class="group-header">${key} (${items.length})</div>`,
+                    ...items.map((i) => this._renderRow(i)),
+                  ]
+                : items.map((i) => this._renderRow(i)),
+            )}
       </ha-card>
       ${this._renderDialog()}
     `;

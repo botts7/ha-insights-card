@@ -136,6 +136,10 @@ export interface CardConfig {
    * an at-a-glance summary instead of inline list interaction.
    */
   compact?: boolean;
+  /** v0.7: list sort order. */
+  sort_by?: "confidence" | "age" | "detector";
+  /** v0.7: render insights grouped under section headers. */
+  group_by?: "area" | "detector" | "none";
 }
 
 /** Subset of the HA `hass` object the card uses. */

@@ -29,6 +29,8 @@ export class HaInsightsPanel extends LitElement {
 
   @state() private _search = "";
   @state() private _minConfidence = 0;
+  @state() private _sortBy: "confidence" | "age" | "detector" = "confidence";
+  @state() private _groupBy: "area" | "detector" | "none" = "none";
   @state() private _backfillBusy = false;
   @state() private _toast = "";
   @state() private _auditOpen = false;
@@ -132,6 +134,18 @@ export class HaInsightsPanel extends LitElement {
     .filters input[type="range"] {
       width: 140px;
     }
+    .filters select {
+      padding: 6px 10px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
+      border-radius: 6px;
+      font: inherit;
+      background: var(--card-background-color, white);
+      color: var(--primary-text-color);
+    }
+    .filters select:focus {
+      outline: none;
+      border-color: var(--primary-color);
+    }
     .body {
       padding: 16px 24px 32px;
       max-width: 1100px;
@@ -232,6 +246,8 @@ export class HaInsightsPanel extends LitElement {
       max_rows: 9999,
       min_confidence: this._minConfidence,
       search: this._search,
+      sort_by: this._sortBy,
+      group_by: this._groupBy,
     };
   }
 
@@ -427,6 +443,28 @@ export class HaInsightsPanel extends LitElement {
             @input=${this._onConfidence}
           />
         </label>
+        <select
+          aria-label="Sort by"
+          .value=${this._sortBy}
+          @change=${(e: Event) =>
+            (this._sortBy = (e.target as HTMLSelectElement)
+              .value as typeof this._sortBy)}
+        >
+          <option value="confidence">Sort: Confidence</option>
+          <option value="age">Sort: Newest</option>
+          <option value="detector">Sort: Detector</option>
+        </select>
+        <select
+          aria-label="Group by"
+          .value=${this._groupBy}
+          @change=${(e: Event) =>
+            (this._groupBy = (e.target as HTMLSelectElement)
+              .value as typeof this._groupBy)}
+        >
+          <option value="none">Group: None</option>
+          <option value="detector">Group: Detector</option>
+          <option value="area">Group: Area</option>
+        </select>
       </div>
       <div class="body">
         ${this._renderCard()}
