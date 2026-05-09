@@ -50,6 +50,33 @@ export interface ExplainResult {
   bytes_received: number;
 }
 
+export interface RefineResult {
+  refined_payload: Record<string, unknown>;
+  rationale: string | null;
+  diff_summary: string[];
+  bytes_sent: number;
+  bytes_received: number;
+}
+
+export interface TestActionsResult {
+  ran: number;
+  error_count: number;
+  results: Array<{
+    index: number;
+    ok: boolean;
+    service?: string;
+    error?: string;
+    skipped?: boolean;
+  }>;
+}
+
+/** Card-side state for an insight with a pending refined preview. */
+export interface RefinedState {
+  payload: Record<string, unknown>;
+  rationale: string | null;
+  diffSummary: string[];
+}
+
 export interface SubscribeEvent {
   action: "added" | "dismissed" | "snoozed" | "applied";
   insight: Insight | null;
@@ -62,10 +89,15 @@ export interface CardConfig {
   min_confidence?: number;
   /** Cap rendered rows. */
   max_rows?: number;
+  /** v0.3: media_player to speak the LLM explanation through. Button only appears when set. */
+  tts_target_entity_id?: string;
+  /** v0.3: optional tts.* engine. If omitted, the card auto-picks the first tts.* entity. */
+  tts_engine_entity_id?: string;
 }
 
 /** Subset of the HA `hass` object the card uses. */
 export interface HassLite {
+  states?: Record<string, { state: string; attributes: Record<string, unknown> }>;
   connection: {
     sendMessagePromise: <T = unknown>(msg: { type: string; [key: string]: unknown }) => Promise<T>;
     subscribeMessage: <T = unknown>(
