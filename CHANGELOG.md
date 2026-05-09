@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.0] — 2026-05-09
+
+Major UX expansion: dedicated panel, visual editor, adaptive sizing, compact tile mode, wider modal, and live search.
+
+### Added
+
+- **`<ha-insights-panel>` sidebar component** (new `dist/ha-insights-panel.js` bundle) — full-page insights view registered by the integration at `/ha-insights`. Sticky header with action buttons (🔄 Backfill, 🔍 Scan now), filter row (search input + min-confidence slider), embedded card body with no row cap. Top-right toast for backfill/scan results.
+- **Visual editor** (`<ha-insights-card-editor>`) — replaces the "Visual editor not supported" fallback. Native `<ha-form>` schema-driven UI: title text, confidence slider, max-rows number, compact toggle, media_player + tts entity pickers, default-search text. `getConfigElement()` + `getStubConfig()` Lovelace hooks wired.
+- **Adaptive row count** — `ResizeObserver` measures the card's height and auto-computes how many rows fit (~72px per row + 60px header). User-set `max_rows` still takes precedence; min 1 row so a tiny slot never goes empty.
+- **Compact tile mode** — new `CardConfig.compact: true` collapses the card to a full-width clickable tile (`"3 insights ready to review →"`) that deep-links to `/ha-insights`. Useful as a dashboard summary.
+- **"View all →" header link** — always-on link in the card header pointing at `/ha-insights`.
+- **Live search filter** — `CardConfig.search` substring filter on insight title (case-insensitive). Panel's search input writes through to this; manual config also works.
+- **Wider modal** — `max-width: 900px` (was 600), `92vw` cap on small screens. YAML payload `<pre>` gets a 360px scroll cap so very long automations stay readable without growing the modal off-screen.
+
+### Changed
+
+- `card_version` handshake bumped to `0.5.0`.
+- Card header is now a flex layout with title + subtitle on the left and the "View all →" link on the right.
+
 ## [0.4.0] — 2026-05-09
 
 Companion release for HA Insights v0.4.0 (recorder backfill).
