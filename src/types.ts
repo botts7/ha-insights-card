@@ -70,6 +70,19 @@ export interface TestActionsResult {
   }>;
 }
 
+export interface BackfillStatus {
+  running: boolean;
+  last: {
+    completed_at: string;
+    events_added: number;
+    entities_seen: number;
+    events_skipped: number;
+    duration_seconds: number;
+    lookback_days: number;
+    started_at: string;
+  } | null;
+}
+
 /** Card-side state for an insight with a pending refined preview. */
 export interface RefinedState {
   payload: Record<string, unknown>;

@@ -10,6 +10,7 @@ import { LitElement, html, css, nothing, type TemplateResult, type PropertyValue
 import { customElement, property, state } from "lit/decorators.js";
 
 import type {
+  BackfillStatus,
   CardConfig,
   ExplainResult,
   HassLite,
@@ -496,7 +497,34 @@ export class HaInsightsCard extends LitElement {
       console.warn("ha-insights-card subscribe failed", err);
     }
 
+    // Surface a one-shot toast if a recent backfill brought in real data.
+    // Silent on 0-event runs (clean install with no recorder history).
+    void this._showBackfillToast();
+
     this._loading = false;
+  }
+
+  private async _showBackfillToast(): Promise<void> {
+    if (!this.hass) return;
+    try {
+      const status = await this.hass.connection.sendMessagePromise<BackfillStatus>(
+        { type: "home_insights/backfill_status" },
+      );
+      if (status.running) {
+        this._toast = "Backfilling history…";
+        return;
+      }
+      const last = status.last;
+      if (!last || last.events_added === 0) return;
+      // Only surface if the run completed in the last 5 minutes — otherwise
+      // it's stale and the user has likely already seen it.
+      const completed = new Date(last.completed_at).getTime();
+      if (Date.now() - completed > 5 * 60 * 1000) return;
+      this._toast = `Backfilled ${last.events_added} events from ${last.entities_seen} entities (${last.lookback_days}d)`;
+    } catch (err) {
+      // Old integration without the endpoint — silent skip.
+      console.debug("backfill_status not available", err);
+    }
   }
 
   private _handleEvent(event: SubscribeEvent): void {
