@@ -53,6 +53,12 @@ export class HaInsightsCard extends LitElement {
   @state() private _renameEdits = new Map<string, { alias?: string; description?: string }>();
   /** Per-insight in-progress follow-up feedback for the next Refine call. */
   @state() private _feedbackById = new Map<string, string>();
+  /** Per-insight free-form JSON edits to the payload (v0.8 phase 3). */
+  @state() private _payloadEditsById = new Map<string, string>();
+  /** Set of insight ids currently in edit mode. */
+  @state() private _editingPayloadFor = new Set<string>();
+  /** Per-insight parse error from the last Apply attempt (e.g. "Invalid JSON"). */
+  @state() private _payloadParseErrorById = new Map<string, string>();
   /** Per-insight redaction preview state — shown when user clicks "What gets sent?" */
   @state() private _previewById = new Map<string, RedactionPreview>();
   @state() private _previewBusy = false;
@@ -513,6 +519,57 @@ export class HaInsightsCard extends LitElement {
       border-color: var(--primary-color);
     }
 
+    /* Inline payload editor (v0.8 phase 3) */
+    .payload-edit {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .payload-edit button {
+      background: none;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
+      color: var(--primary-text-color);
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.8em;
+    }
+    .payload-edit button:hover {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+    }
+    textarea.payload-editor {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 240px;
+      max-height: 360px;
+      padding: 10px 12px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
+      border-radius: 6px;
+      font-family: var(--code-font-family, "SFMono-Regular", Consolas, monospace);
+      font-size: 0.82em;
+      line-height: 1.5;
+      background: var(--code-background-color, rgba(0, 0, 0, 0.04));
+      color: var(--primary-text-color);
+      resize: vertical;
+      white-space: pre;
+    }
+    textarea.payload-editor:focus {
+      outline: none;
+      border-color: var(--primary-color);
+    }
+    textarea.payload-editor.error {
+      border-color: var(--error-color, #c62828);
+    }
+    .payload-error {
+      margin-top: 6px;
+      padding: 8px 10px;
+      background: rgba(244, 67, 54, 0.10);
+      color: var(--error-color, #c62828);
+      border-radius: 4px;
+      font-size: 0.85em;
+    }
+
     /* Rename inputs */
     .rename {
       margin-top: 12px;
@@ -856,14 +913,47 @@ export class HaInsightsCard extends LitElement {
 
   private async _apply(insight: Insight, refinedPayload?: Record<string, unknown>): Promise<void> {
     if (!this.hass) return;
+
+    // If the user opened the inline payload editor, parse their JSON.
+    // Parse errors abort the apply with an inline error in the modal —
+    // the modal stays open so they can fix and retry.
+    let editedPayload: Record<string, unknown> | undefined;
+    const editedSource = this._payloadEditsById.get(insight.id);
+    if (
+      editedSource !== undefined
+      && this._editingPayloadFor.has(insight.id)
+    ) {
+      try {
+        const parsed = JSON.parse(editedSource);
+        if (
+          typeof parsed !== "object"
+          || parsed === null
+          || Array.isArray(parsed)
+        ) {
+          throw new Error("Edited payload must be a JSON object");
+        }
+        editedPayload = parsed as Record<string, unknown>;
+        const errs = new Map(this._payloadParseErrorById);
+        errs.delete(insight.id);
+        this._payloadParseErrorById = errs;
+      } catch (err) {
+        const errs = new Map(this._payloadParseErrorById);
+        errs.set(insight.id, `Invalid JSON: ${this._asMessage(err)}`);
+        this._payloadParseErrorById = errs;
+        return;
+      }
+    }
+
     this._busyId = insight.id;
     try {
-      // Build the effective payload: refined (if any) merged with any rename edits
-      const basePayload = refinedPayload ?? insight.payload;
+      // Edit precedence: explicit edited payload > refined > original.
+      // Rename block layers on top of whichever base the user is using.
+      const basePayload = editedPayload ?? refinedPayload ?? insight.payload;
       const edits = this._renameEdits.get(insight.id);
       const renamed = edits && (edits.alias !== undefined || edits.description !== undefined);
+      const useOverride = editedPayload || refinedPayload || renamed;
       const override: Record<string, unknown> | undefined =
-        refinedPayload || renamed
+        useOverride
           ? { ...basePayload, ...(edits ?? {}) }
           : undefined;
 
@@ -879,16 +969,60 @@ export class HaInsightsCard extends LitElement {
       this._renameEdits.delete(insight.id);
       this._removeFromList(insight.id);
 
-      const label = refinedPayload
-        ? "Applied refined"
-        : renamed
-          ? "Applied (renamed)"
-          : "Applied";
+      const label = editedPayload
+        ? "Applied (edited)"
+        : refinedPayload
+          ? "Applied refined"
+          : renamed
+            ? "Applied (renamed)"
+            : "Applied";
       this._toast = `${label}: ${insight.title}`;
+
+      // Cleanup edit state on successful apply
+      const editing = new Set(this._editingPayloadFor);
+      editing.delete(insight.id);
+      this._editingPayloadFor = editing;
+      const drafts = new Map(this._payloadEditsById);
+      drafts.delete(insight.id);
+      this._payloadEditsById = drafts;
     } catch (err) {
       this._failModal(`Apply failed: ${this._asMessage(err)}`);
     } finally {
       this._busyId = undefined;
+    }
+  }
+
+  private _togglePayloadEdit(insight: Insight): void {
+    const editing = new Set(this._editingPayloadFor);
+    if (editing.has(insight.id)) {
+      editing.delete(insight.id);
+      // Discard the in-progress edit
+      const drafts = new Map(this._payloadEditsById);
+      drafts.delete(insight.id);
+      this._payloadEditsById = drafts;
+      const errs = new Map(this._payloadParseErrorById);
+      errs.delete(insight.id);
+      this._payloadParseErrorById = errs;
+    } else {
+      editing.add(insight.id);
+      // Seed the editor with the current pretty-printed JSON
+      const drafts = new Map(this._payloadEditsById);
+      drafts.set(insight.id, JSON.stringify(insight.payload, null, 2));
+      this._payloadEditsById = drafts;
+    }
+    this._editingPayloadFor = editing;
+  }
+
+  private _onPayloadEditInput(insightId: string, e: Event): void {
+    const value = (e.target as HTMLTextAreaElement).value;
+    const drafts = new Map(this._payloadEditsById);
+    drafts.set(insightId, value);
+    this._payloadEditsById = drafts;
+    // Clear stale parse error so user gets immediate feedback on next Apply
+    if (this._payloadParseErrorById.has(insightId)) {
+      const errs = new Map(this._payloadParseErrorById);
+      errs.delete(insightId);
+      this._payloadParseErrorById = errs;
     }
   }
 
@@ -1134,6 +1268,37 @@ export class HaInsightsCard extends LitElement {
     this._testResults = undefined;
   }
 
+  private _renderPayloadView(insight: Insight): TemplateResult {
+    const editing = this._editingPayloadFor.has(insight.id);
+    const draft = this._payloadEditsById.get(insight.id);
+    const parseError = this._payloadParseErrorById.get(insight.id);
+    return html`
+      <div class="payload-edit">
+        <button
+          @click=${() => this._togglePayloadEdit(insight)}
+          title=${editing
+            ? "Discard edits and revert to the detected payload"
+            : "Edit the payload as JSON before Apply"}
+        >
+          ${editing ? "✕ Cancel edit" : "✎ Edit"}
+        </button>
+      </div>
+      ${editing
+        ? html`
+            <textarea
+              class="payload-editor ${parseError ? "error" : ""}"
+              spellcheck="false"
+              .value=${draft ?? JSON.stringify(insight.payload, null, 2)}
+              @input=${(e: Event) => this._onPayloadEditInput(insight.id, e)}
+            ></textarea>
+            ${parseError
+              ? html`<div class="payload-error">${parseError}</div>`
+              : nothing}
+          `
+        : html`<pre>${JSON.stringify(insight.payload, null, 2)}</pre>`}
+    `;
+  }
+
   private _renderModalError(): TemplateResult | typeof nothing {
     if (!this._modalError) return nothing;
     return html`
@@ -1295,10 +1460,20 @@ export class HaInsightsCard extends LitElement {
 
   private _closeDialog(): void {
     if (this._dialogId) {
-      // Discard rename edits when the modal closes without applying.
-      const next = new Map(this._renameEdits);
-      next.delete(this._dialogId);
-      this._renameEdits = next;
+      // Discard rename + payload edits when the modal closes without applying.
+      const id = this._dialogId;
+      const renames = new Map(this._renameEdits);
+      renames.delete(id);
+      this._renameEdits = renames;
+      const drafts = new Map(this._payloadEditsById);
+      drafts.delete(id);
+      this._payloadEditsById = drafts;
+      const editing = new Set(this._editingPayloadFor);
+      editing.delete(id);
+      this._editingPayloadFor = editing;
+      const errs = new Map(this._payloadParseErrorById);
+      errs.delete(id);
+      this._payloadParseErrorById = errs;
     }
     this._dialogId = undefined;
     this._testResults = undefined;
@@ -1589,7 +1764,7 @@ export class HaInsightsCard extends LitElement {
                       : nothing}
                   </div>
                   <h4>Automation that would be created</h4>
-                  <pre>${JSON.stringify(insight.payload, null, 2)}</pre>
+                  ${this._renderPayloadView(insight)}
                   ${insight.explanation
                     ? html`<div class="explanation">${insight.explanation}</div>`
                     : nothing}
