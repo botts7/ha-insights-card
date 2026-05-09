@@ -34,6 +34,10 @@ export class HaInsightsCard extends LitElement {
   @state() private _hello?: HelloResult;
   @state() private _insights: Insight[] = [];
   @state() private _error?: string;
+  /** Errors that originated inside the open dialog should stay scoped there
+   * (refine validation failures, LLM rate limits, etc), not bleed back to
+   * the main card where they'd hide the rows. */
+  @state() private _modalError?: string;
   @state() private _loading = true;
   @state() private _busyId?: string;
   @state() private _toast?: string;
@@ -677,7 +681,7 @@ export class HaInsightsCard extends LitElement {
           : "Applied";
       this._toast = `${label}: ${insight.title}`;
     } catch (err) {
-      this._error = `Apply failed: ${this._asMessage(err)}`;
+      this._failModal(`Apply failed: ${this._asMessage(err)}`);
     } finally {
       this._busyId = undefined;
     }
@@ -721,6 +725,16 @@ export class HaInsightsCard extends LitElement {
     `;
   }
 
+  /** Pick the right error sink. Modal-open errors stay scoped; the rest go
+   *  to the main card banner. */
+  private _failModal(message: string): void {
+    if (this._dialogId) {
+      this._modalError = message;
+    } else {
+      this._error = message;
+    }
+  }
+
   private async _dismiss(insight: Insight): Promise<void> {
     if (!this.hass) return;
     this._busyId = insight.id;
@@ -732,7 +746,7 @@ export class HaInsightsCard extends LitElement {
       this._removeFromList(insight.id);
       this._toast = "Dismissed";
     } catch (err) {
-      this._error = `Dismiss failed: ${this._asMessage(err)}`;
+      this._failModal(`Dismiss failed: ${this._asMessage(err)}`);
     } finally {
       this._busyId = undefined;
     }
@@ -752,7 +766,7 @@ export class HaInsightsCard extends LitElement {
       this._removeFromList(insight.id);
       this._toast = "Snoozed for 7 days";
     } catch (err) {
-      this._error = `Snooze failed: ${this._asMessage(err)}`;
+      this._failModal(`Snooze failed: ${this._asMessage(err)}`);
     } finally {
       this._busyId = undefined;
     }
@@ -770,7 +784,7 @@ export class HaInsightsCard extends LitElement {
         i.id === insight.id ? { ...i, explanation: result.explanation } : i,
       );
     } catch (err) {
-      this._error = `Explain failed: ${this._asMessage(err)}`;
+      this._failModal(`Explain failed: ${this._asMessage(err)}`);
     } finally {
       this._explainBusy = false;
     }
@@ -779,6 +793,7 @@ export class HaInsightsCard extends LitElement {
   private async _refine(insight: Insight): Promise<void> {
     if (!this.hass) return;
     this._refineBusy = true;
+    this._modalError = undefined;
     try {
       const result = await this.hass.connection.sendMessagePromise<RefineResult>({
         type: "home_insights/refine",
@@ -795,7 +810,7 @@ export class HaInsightsCard extends LitElement {
         ? `Refined: ${result.diff_summary.length} change(s) proposed`
         : "Refined: no changes proposed";
     } catch (err) {
-      this._error = `Refine failed: ${this._asMessage(err)}`;
+      this._failModal(`Refine failed: ${this._asMessage(err)}`);
     } finally {
       this._refineBusy = false;
     }
@@ -827,7 +842,7 @@ export class HaInsightsCard extends LitElement {
         tested: which,
       };
     } catch (err) {
-      this._error = `Test actions failed: ${this._asMessage(err)}`;
+      this._failModal(`Test actions failed: ${this._asMessage(err)}`);
     } finally {
       this._testBusy = false;
     }
@@ -835,6 +850,16 @@ export class HaInsightsCard extends LitElement {
 
   private _clearTestResults(): void {
     this._testResults = undefined;
+  }
+
+  private _renderModalError(): TemplateResult | typeof nothing {
+    if (!this._modalError) return nothing;
+    return html`
+      <div class="error-banner" style="margin-bottom: 12px; border-radius: 6px;">
+        <span>${this._modalError}</span>
+        <button @click=${() => (this._modalError = undefined)}>Dismiss</button>
+      </div>
+    `;
   }
 
   private _renderTestResults(): TemplateResult | typeof nothing {
@@ -892,9 +917,10 @@ export class HaInsightsCard extends LitElement {
     if (!target) return;
     const engine = this._resolveTtsEngine();
     if (!engine) {
-      this._error =
+      this._failModal(
         "No TTS engine found. Install one (Piper / Google Cloud / Nabu Casa) or set " +
-        "tts_engine_entity_id in the card config.";
+          "tts_engine_entity_id in the card config.",
+      );
       return;
     }
     this._ttsBusy = true;
@@ -911,7 +937,7 @@ export class HaInsightsCard extends LitElement {
       });
       this._toast = `Speaking on ${target}`;
     } catch (err) {
-      this._error = `TTS failed: ${this._asMessage(err)}`;
+      this._failModal(`TTS failed: ${this._asMessage(err)}`);
     } finally {
       this._ttsBusy = false;
     }
@@ -946,6 +972,7 @@ export class HaInsightsCard extends LitElement {
   private _openDialog(insightId: string): void {
     this._dialogId = insightId;
     this._testResults = undefined;
+    this._modalError = undefined;
   }
 
   private _closeDialog(): void {
@@ -957,6 +984,7 @@ export class HaInsightsCard extends LitElement {
     }
     this._dialogId = undefined;
     this._testResults = undefined;
+    this._modalError = undefined;
   }
 
   private _renderModeBadge(mode: PrivacyMode | undefined): TemplateResult | typeof nothing {
@@ -1128,11 +1156,13 @@ export class HaInsightsCard extends LitElement {
           </div>
           ${refined
             ? html`<div class="dialog-body">
+                ${this._renderModalError()}
                 ${this._renderTestResults()}
                 ${this._renderRefinedPreview(insight, refined)}
               </div>`
             : html`
                 <div class="dialog-body">
+                  ${this._renderModalError()}
                   ${this._renderTestResults()}
                   <div class="row-meta">
                     <span class="pill">confidence ${confidencePct}%</span>
