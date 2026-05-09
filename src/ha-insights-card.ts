@@ -283,6 +283,18 @@ export class HaInsightsCard extends LitElement {
       opacity: 0.5;
       cursor: not-allowed;
     }
+    /* v0.8 phase 5: pulse animation on LLM-busy buttons so the user
+       knows the round-trip is in flight (5-15s typical). Replaces the
+       static "asking LLM…" text without changing the button copy. */
+    @keyframes ha-insights-pulse {
+      0%   { opacity: 0.55; }
+      50%  { opacity: 1; }
+      100% { opacity: 0.55; }
+    }
+    button.action.busy-pulse:disabled {
+      opacity: 1;
+      animation: ha-insights-pulse 1.4s ease-in-out infinite;
+    }
     button.primary {
       background: var(--primary-color);
       color: var(--text-primary-color, white);
@@ -774,7 +786,7 @@ export class HaInsightsCard extends LitElement {
     try {
       this._hello = await this.hass.connection.sendMessagePromise<HelloResult>({
         type: "home_insights/hello",
-        card_version: "0.8.0",
+        card_version: "0.8.1",
       });
     } catch (err) {
       this._error = `Integration not reachable: ${this._asMessage(err)}`;
@@ -1692,11 +1704,11 @@ export class HaInsightsCard extends LitElement {
       ${this._renderFeedbackInput(insight, "Ask the LLM for further changes")}
       <div class="explain-row">
         <button
-          class="action"
+          class="action ${this._refineBusy ? "busy-pulse" : ""}"
           ?disabled=${this._refineBusy}
           @click=${() => this._refine(insight)}
         >
-          ${this._refineBusy ? "asking LLM…" : "Refine again"}
+          ${this._refineBusy ? "💭 refining…" : "Refine again"}
         </button>
         <button
           class="action"
@@ -1780,23 +1792,23 @@ export class HaInsightsCard extends LitElement {
                     ${llmEnabled && !insight.explanation
                       ? html`
                           <button
-                            class="action"
+                            class="action ${this._explainBusy ? "busy-pulse" : ""}"
                             ?disabled=${this._explainBusy}
                             @click=${() => this._explain(insight)}
                           >
-                            ${this._explainBusy ? "asking LLM…" : "Explain with LLM"}
+                            ${this._explainBusy ? "💭 thinking…" : "Explain with LLM"}
                           </button>
                         `
                       : nothing}
                     ${llmEnabled
                       ? html`
                           <button
-                            class="action"
+                            class="action ${this._refineBusy ? "busy-pulse" : ""}"
                             ?disabled=${this._refineBusy}
                             title="Ask the LLM to refine this automation"
                             @click=${() => this._refine(insight)}
                           >
-                            ${this._refineBusy ? "asking LLM…" : "✨ Refine with LLM"}
+                            ${this._refineBusy ? "💭 refining…" : "✨ Refine with LLM"}
                           </button>
                           <button
                             class="action"

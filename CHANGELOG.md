@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.1] — 2026-05-10
+
+Three apply-flow polish items.
+
+### Added
+
+- **Inline payload editor** — new `✎ Edit` button in the modal swaps the read-only `<pre>` for a `<textarea>` of the JSON payload. User can rewrite the whole automation pre-Apply (not just alias/description). Apply parses the textarea, sends parsed dict via the existing `payload_override`. Parse errors surface inline; modal stays open for the fix. New apply-toast label `Applied (edited)` so the user knows what shipped.
+- **Bulk apply in panel** — new `✓ Apply all visible` header button iterates the currently-filtered list and applies each insight as a real HA automation. Confirms first; toast summarizes successes vs errors with first error message.
+- **LLM-busy pulse animation** — Refine + Explain buttons pulse (1.4s ease-in-out opacity) while the WS round-trip is in flight, with `💭 thinking…` / `💭 refining…` copy. Replaces the static "asking LLM…" text.
+
+### Changed
+
+- `card_version` handshake bumped to `0.8.1`.
+- Edit precedence in `_apply`: edited > refined > original; rename block layers on top of whichever base is active.
+- Apply now cleans up payload-edit state on success (matching the existing rename / refined cleanup).
+
 ## [0.8.0] — 2026-05-10
 
 Card UX for v0.8.0's undo flow.

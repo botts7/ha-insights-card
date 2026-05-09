@@ -32,6 +32,7 @@ export class HaInsightsPanel extends LitElement {
   @state() private _sortBy: "confidence" | "age" | "detector" = "confidence";
   @state() private _groupBy: "area" | "detector" | "none" = "none";
   @state() private _backfillBusy = false;
+  @state() private _bulkBusy = false;
   @state() private _toast = "";
   @state() private _auditOpen = false;
   @state() private _auditLog: AuditLogCall[] = [];
@@ -305,6 +306,80 @@ export class HaInsightsPanel extends LitElement {
     }
   }
 
+  /** Bulk-apply all currently-visible insights (after the panel's filters
+   *  have been applied). Confirms first because each apply writes a real
+   *  automation. Best for power users triaging a backlog after a long
+   *  detection run; not exposed on the dashboard card. */
+  private async _runBulkApply(): Promise<void> {
+    if (!this.hass) return;
+    // Pull the same filtered list the embedded card is rendering. We query
+    // the WS API directly so the panel doesn't have to peek into the
+    // card's internals.
+    let visible: Array<{ id: string; title: string; payload_format?: string }> = [];
+    try {
+      const result = await this.hass.connection.sendMessagePromise<{
+        insights: Array<{
+          id: string;
+          title: string;
+          confidence: number;
+          payload_format?: string;
+        }>;
+      }>({ type: "home_insights/list" });
+      const search = this._search.trim().toLowerCase();
+      visible = result.insights
+        .filter((i) => i.confidence >= this._minConfidence)
+        .filter((i) => !search || i.title.toLowerCase().includes(search))
+        .filter((i) => i.payload_format === "automation");
+    } catch (err) {
+      this._showToast(
+        `Could not list: ${(err as { message?: string }).message ?? String(err)}`,
+      );
+      return;
+    }
+
+    if (visible.length === 0) {
+      this._showToast("Nothing to apply (no automation insights match)");
+      return;
+    }
+
+    const proceed = window.confirm(
+      `Apply ${visible.length} insight${visible.length === 1 ? "" : "s"}? `
+        + "Each will write a real Home Assistant automation. "
+        + "Refined / renamed / edited drafts on individual insights are NOT used "
+        + "by bulk apply — only the original detected payload.",
+    );
+    if (!proceed) return;
+
+    this._bulkBusy = true;
+    let succeeded = 0;
+    const errors: string[] = [];
+    try {
+      for (const insight of visible) {
+        try {
+          await this.hass.connection.sendMessagePromise({
+            type: "home_insights/apply",
+            insight_id: insight.id,
+          });
+          succeeded += 1;
+        } catch (err) {
+          const message =
+            (err as { message?: string }).message ?? String(err);
+          errors.push(`${insight.title}: ${message}`);
+        }
+      }
+    } finally {
+      this._bulkBusy = false;
+    }
+
+    if (errors.length === 0) {
+      this._showToast(`Applied all ${succeeded}`);
+    } else {
+      this._showToast(
+        `Applied ${succeeded} / ${visible.length}; ${errors.length} error(s) — first: ${errors[0]}`,
+      );
+    }
+  }
+
   private _showToast(message: string): void {
     this._toast = message;
     window.clearTimeout(this._toastTimer);
@@ -422,6 +497,14 @@ export class HaInsightsPanel extends LitElement {
             @click=${this._runScanNow}
           >
             🔍 Scan now
+          </button>
+          <button
+            class="action"
+            ?disabled=${this._bulkBusy}
+            title="Apply every visible automation insight (respects search + confidence filters)"
+            @click=${this._runBulkApply}
+          >
+            ${this._bulkBusy ? "Applying…" : "✓ Apply all visible"}
           </button>
         </div>
       </div>
