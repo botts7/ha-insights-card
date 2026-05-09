@@ -46,6 +46,9 @@ export class HaInsightsCard extends LitElement {
   @state() private _explainBusy = false;
   @state() private _ttsBusy = false;
   @state() private _refineBusy = false;
+  /** v0.9 phase 6: ephemeral hypothesis text per anomaly id. Not persisted. */
+  @state() private _hypothesisById = new Map<string, string>();
+  @state() private _hypothesizeBusy = false;
   @state() private _testBusy = false;
   @state() private _scanBusy = false;
   /** Per-insight refined preview held in card state until Apply or Keep Original. */
@@ -1204,6 +1207,27 @@ export class HaInsightsCard extends LitElement {
     }
   }
 
+  /** v0.9 phase 6: ask the LLM for plausible causes of an anomaly. */
+  private async _hypothesize(insight: Insight): Promise<void> {
+    if (!this.hass) return;
+    this._hypothesizeBusy = true;
+    try {
+      const result = await this.hass.connection.sendMessagePromise<{
+        hypothesis: string;
+      }>({
+        type: "home_insights/hypothesize",
+        insight_id: insight.id,
+      });
+      const next = new Map(this._hypothesisById);
+      next.set(insight.id, result.hypothesis ?? "");
+      this._hypothesisById = next;
+    } catch (err) {
+      this._failModal(`Hypothesize failed: ${this._asMessage(err)}`);
+    } finally {
+      this._hypothesizeBusy = false;
+    }
+  }
+
   private async _refine(insight: Insight): Promise<void> {
     if (!this.hass) return;
     this._refineBusy = true;
@@ -1914,6 +1938,12 @@ export class HaInsightsCard extends LitElement {
                   ${insight.explanation
                     ? html`<div class="explanation">${insight.explanation}</div>`
                     : nothing}
+                  ${this._hypothesisById.has(insight.id)
+                    ? html`<div class="explanation hypothesis">
+                        <strong>Likely causes:</strong>
+                        ${this._hypothesisById.get(insight.id)}
+                      </div>`
+                    : nothing}
                   ${this._renderPreview(insight)}
                   ${this._renderRename(insight, undefined)}
                   ${llmEnabled
@@ -1955,6 +1985,22 @@ export class HaInsightsCard extends LitElement {
                               : this._previewById.has(insight.id)
                                 ? "🛡️ Hide preview"
                                 : "🛡️ What gets sent?"}
+                          </button>
+                        `
+                      : nothing}
+                    ${llmEnabled && insight.kind === "anomaly"
+                      ? html`
+                          <button
+                            class="action ${this._hypothesizeBusy ? "busy-pulse" : ""}"
+                            ?disabled=${this._hypothesizeBusy}
+                            title="Ask the LLM for plausible causes of this anomaly"
+                            @click=${() => this._hypothesize(insight)}
+                          >
+                            ${this._hypothesizeBusy
+                              ? "💭 thinking…"
+                              : this._hypothesisById.has(insight.id)
+                                ? "🔍 Re-hypothesize"
+                                : "🔍 Get hypothesis"}
                           </button>
                         `
                       : nothing}
