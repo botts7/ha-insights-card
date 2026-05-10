@@ -2879,7 +2879,16 @@ class HaInsightsPanel extends i {
             const result = await this.hass.connection.sendMessagePromise({ type: "home_insights/scan_now" });
             const noun = result.insights_emitted === 1 ? "insight" : "insights";
             const verb = result.canceled ? "canceled" : "complete";
-            this._showToast(`Scan ${verb}: ${result.insights_emitted} new ${noun} from ${result.detectors_run.length} detectors`);
+            const parts = [
+                `Scan ${verb}: ${result.insights_emitted} new ${noun} from ${result.detectors_run.length} detectors`,
+            ];
+            if (result.swept_stale) {
+                parts.push(`${result.swept_stale} stale removed`);
+            }
+            if (result.suppressed_as_duplicate) {
+                parts.push(`${result.suppressed_as_duplicate} dup-of-existing-automation suppressed`);
+            }
+            this._showToast(parts.join(" · "));
         }
         catch (err) {
             this._showToast(`Scan failed: ${err.message ?? String(err)}`);

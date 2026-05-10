@@ -469,13 +469,22 @@ export class HaInsightsPanel extends LitElement {
       const result = await this.hass.connection.sendMessagePromise<{
         detectors_run: string[];
         insights_emitted: number;
+        swept_stale?: number;
+        suppressed_as_duplicate?: number;
         canceled?: boolean;
       }>({ type: "home_insights/scan_now" });
       const noun = result.insights_emitted === 1 ? "insight" : "insights";
       const verb = result.canceled ? "canceled" : "complete";
-      this._showToast(
+      const parts = [
         `Scan ${verb}: ${result.insights_emitted} new ${noun} from ${result.detectors_run.length} detectors`,
-      );
+      ];
+      if (result.swept_stale) {
+        parts.push(`${result.swept_stale} stale removed`);
+      }
+      if (result.suppressed_as_duplicate) {
+        parts.push(`${result.suppressed_as_duplicate} dup-of-existing-automation suppressed`);
+      }
+      this._showToast(parts.join(" · "));
     } catch (err) {
       this._showToast(
         `Scan failed: ${(err as { message?: string }).message ?? String(err)}`,
