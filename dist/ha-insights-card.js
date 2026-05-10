@@ -461,6 +461,26 @@ class HaInsightsCard extends i {
       padding: 2px 8px;
       border-radius: 10px;
     }
+    /* v1.1: pill + ✏️ Refine action button cluster — keeps the pill
+       and its sibling button visually adjacent without disturbing
+       the row's existing pill flow. */
+    .automation-pill-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .pill-action {
+      background: transparent;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      padding: 1px 6px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 0.95em;
+      color: var(--secondary-text-color);
+    }
+    .pill-action:hover {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.06));
+    }
     /* Confidence pill color coding (v0.7) */
     .pill.confidence-high {
       background: rgba(76, 175, 80, 0.18);
@@ -1974,14 +1994,237 @@ class HaInsightsCard extends i {
         // automation by alias.
         const firstWithUrl = links.find((l) => l.url);
         const url = firstWithUrl?.url ?? "/config/automations/dashboard";
-        return b `<a
-      class="pill"
-      href=${url}
-      target="_top"
-      style="color: ${color}; text-decoration: none; cursor: pointer;"
-      title=${tooltip}
-      @click=${(e) => e.stopPropagation()}
-    >${label}</a>`;
+        // ✏️ Refine-with-AI button only appears when there's an id we can
+        // round-trip to the WS endpoints. Stops here-be-dragons cases for
+        // legacy YAML automations without ids that we can't load reliably.
+        const refineTarget = firstWithUrl ?? links.find((l) => l.id);
+        return b `<span class="automation-pill-group">
+      <a
+        class="pill"
+        href=${url}
+        target="_top"
+        style="color: ${color}; text-decoration: none; cursor: pointer;"
+        title=${tooltip}
+        @click=${(e) => e.stopPropagation()}
+      >${label}</a>
+      ${refineTarget?.id
+            ? b `<button
+            class="pill-action"
+            title="Refine this automation with AI"
+            @click=${(e) => {
+                e.stopPropagation();
+                this._openRefineAutomationModal(refineTarget.id, refineTarget.alias);
+            }}
+          >✏️</button>`
+            : A}
+    </span>`;
+    }
+    /** Open the refine-existing-automation modal. Loads the YAML via
+     *  home_insights/get_automation, then shows the editor + feedback
+     *  panel. Errors display inline in the modal. */
+    async _openRefineAutomationModal(automationId, alias) {
+        if (!this.hass)
+            return;
+        this._refineAutomationModal = {
+            automationId,
+            alias,
+            feedback: "",
+            busy: true,
+        };
+        try {
+            const result = await this.hass.connection.sendMessagePromise({
+                type: "home_insights/get_automation",
+                automation_id: automationId,
+            });
+            this._refineAutomationModal = {
+                ...this._refineAutomationModal,
+                originalYaml: result.yaml,
+                busy: false,
+            };
+        }
+        catch (err) {
+            this._refineAutomationModal = {
+                ...this._refineAutomationModal,
+                busy: false,
+                error: `Could not load automation: ${this._asMessage(err)}`,
+            };
+        }
+    }
+    _closeRefineAutomationModal() {
+        this._refineAutomationModal = undefined;
+    }
+    async _submitRefineAutomation() {
+        if (!this.hass || !this._refineAutomationModal)
+            return;
+        const m = this._refineAutomationModal;
+        if (!m.feedback.trim()) {
+            this._refineAutomationModal = {
+                ...m,
+                error: "Add some feedback for the LLM (what should change?)",
+            };
+            return;
+        }
+        this._refineAutomationModal = { ...m, busy: true, error: undefined };
+        try {
+            const result = await this.hass.connection.sendMessagePromise({
+                type: "home_insights/refine_automation",
+                automation_id: m.automationId,
+                feedback: m.feedback,
+            });
+            this._refineAutomationModal = {
+                ...this._refineAutomationModal,
+                busy: false,
+                originalYaml: result.original_yaml,
+                refinedYaml: result.refined_yaml,
+                refinedConfig: result.refined_config,
+                rationale: result.rationale,
+                diffSummary: result.diff_summary,
+                bytesSent: result.bytes_sent,
+                bytesReceived: result.bytes_received,
+            };
+        }
+        catch (err) {
+            this._refineAutomationModal = {
+                ...this._refineAutomationModal,
+                busy: false,
+                error: `Refine failed: ${this._asMessage(err)}`,
+            };
+        }
+    }
+    async _applyRefineAutomation() {
+        if (!this.hass || !this._refineAutomationModal)
+            return;
+        const m = this._refineAutomationModal;
+        if (!m.refinedConfig)
+            return;
+        this._refineAutomationModal = { ...m, busy: true, error: undefined };
+        try {
+            await this.hass.connection.sendMessagePromise({
+                type: "home_insights/apply_automation_refinement",
+                automation_id: m.automationId,
+                refined_config: m.refinedConfig,
+            });
+            this._toast = `Applied refinement to '${m.alias}'`;
+            this._refineAutomationModal = undefined;
+        }
+        catch (err) {
+            this._refineAutomationModal = {
+                ...this._refineAutomationModal,
+                busy: false,
+                error: `Apply failed: ${this._asMessage(err)}`,
+            };
+        }
+    }
+    _renderRefineAutomationModal() {
+        const m = this._refineAutomationModal;
+        if (!m)
+            return A;
+        return b `<div
+      class="dialog-backdrop"
+      @click=${this._closeRefineAutomationModal}
+    >
+      <div
+        class="dialog"
+        @click=${(e) => e.stopPropagation()}
+        style="max-width: 900px;"
+      >
+        <div class="dialog-header">
+          <div class="dialog-title">✏️ Refine '${m.alias}' with AI</div>
+          <button
+            class="dialog-close"
+            aria-label="Close"
+            @click=${this._closeRefineAutomationModal}
+          >×</button>
+        </div>
+        <div class="dialog-body">
+          ${m.error
+            ? b `<div
+                class="error-banner"
+                style="margin-bottom: 12px; border-radius: 6px;"
+              >${m.error}</div>`
+            : A}
+          ${m.busy
+            ? b `<div style="padding: 12px;">⏳ Working…</div>`
+            : A}
+          ${m.originalYaml && !m.refinedYaml
+            ? b `
+                <div style="margin-bottom: 8px; font-weight: 500;">
+                  Current automation
+                </div>
+                <pre
+                  style="max-height: 280px; overflow: auto; background: var(--code-background-color, rgba(0,0,0,0.04)); padding: 12px; border-radius: 4px; font-size: 0.85em;"
+                >${m.originalYaml}</pre>
+                <div style="margin-top: 16px; margin-bottom: 8px; font-weight: 500;">
+                  What should change?
+                </div>
+                <textarea
+                  rows="4"
+                  style="width: 100%; padding: 8px; box-sizing: border-box; font-family: inherit;"
+                  placeholder="e.g. 'Move the trigger 10 minutes earlier' or 'Skip on weekends' or 'Add a notification when it fires'"
+                  .value=${m.feedback}
+                  @input=${(e) => {
+                if (this._refineAutomationModal) {
+                    this._refineAutomationModal = {
+                        ...this._refineAutomationModal,
+                        feedback: e.target.value,
+                    };
+                }
+            }}
+                  ?disabled=${m.busy}
+                ></textarea>
+              `
+            : A}
+          ${m.refinedYaml
+            ? b `
+                ${m.rationale
+                ? b `<div
+                      style="margin-bottom: 12px; padding: 10px; background: var(--info-background-color, rgba(33, 150, 243, 0.08)); border-left: 3px solid var(--info-color, #2196f3); border-radius: 4px;"
+                    ><strong>Why these changes:</strong> ${m.rationale}</div>`
+                : A}
+                ${m.diffSummary && m.diffSummary.length > 0
+                ? b `<ul
+                      style="margin: 0 0 12px 0; padding-left: 20px;"
+                    >${m.diffSummary.map((line) => b `<li>${line}</li>`)}</ul>`
+                : A}
+                <div style="margin-bottom: 8px; font-weight: 500;">
+                  Refined YAML
+                </div>
+                <pre
+                  style="max-height: 320px; overflow: auto; background: var(--code-background-color, rgba(76, 175, 80, 0.08)); padding: 12px; border-radius: 4px; font-size: 0.85em; border-left: 3px solid var(--success-color, #4caf50);"
+                >${m.refinedYaml}</pre>
+              `
+            : A}
+        </div>
+        <div class="dialog-footer">
+          ${!m.refinedYaml
+            ? b `<button
+                @click=${this._submitRefineAutomation}
+                ?disabled=${m.busy || !m.feedback.trim()}
+              >${m.busy ? "Refining…" : "Refine with AI"}</button>`
+            : b `
+                <button
+                  @click=${() => {
+                if (this._refineAutomationModal) {
+                    this._refineAutomationModal = {
+                        ...this._refineAutomationModal,
+                        refinedYaml: undefined,
+                        refinedConfig: undefined,
+                        rationale: undefined,
+                        diffSummary: undefined,
+                    };
+                }
+            }}
+                  ?disabled=${m.busy}
+                >Discard refinement</button>
+                <button
+                  class="primary"
+                  @click=${this._applyRefineAutomation}
+                  ?disabled=${m.busy}
+                >${m.busy ? "Applying…" : "Apply refinement"}</button>
+              `}
+        </div>
+      </div>
+    </div>`;
     }
     /** Render insight.created_at as a relative-time pill ("3h ago" / "yesterday").
      *  Returns "" for very fresh (<5min) so we don't clutter brand-new rows. */
@@ -2387,6 +2630,7 @@ class HaInsightsCard extends i {
                 : items.map((i) => this._renderRow(i)))}
       </ha-card>
       ${this._renderDialog()}
+      ${this._renderRefineAutomationModal()}
     `;
     }
 }
@@ -2474,6 +2718,9 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_testResults", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_refineAutomationModal", void 0);
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_autoMaxRows", void 0);
