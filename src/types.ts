@@ -148,7 +148,9 @@ export interface RefinedState {
 }
 
 export interface SubscribeEvent {
-  action: "added" | "dismissed" | "snoozed" | "applied";
+  /** v1.1: `purged` carries insight=null and means "drop entire local
+   * list" — fired after ha_insights.purge_observations / Purge button. */
+  action: "added" | "dismissed" | "snoozed" | "applied" | "undone" | "purged";
   insight: Insight | null;
 }
 

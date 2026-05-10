@@ -1023,6 +1023,16 @@ class HaInsightsCard extends i {
         this._loading = false;
     }
     _handleEvent(event) {
+        // `purged` events carry no insight payload — server fires one when
+        // the user clicks "Purge all" / calls ha_insights.purge_observations.
+        // Drop the entire local list so the panel goes empty live, no
+        // manual page refresh needed.
+        if (event.action === "purged") {
+            this._insights = [];
+            if (this._dialogId)
+                this._closeDialog();
+            return;
+        }
         if (!event.insight)
             return;
         const next = [...this._insights];
