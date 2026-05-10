@@ -1824,7 +1824,11 @@ export class HaInsightsCard extends LitElement {
               >✓ applied</span>`
             : nothing}
           ${insight.conflicts_with.length > 0
-            ? html`<span class="pill" style="color: var(--warning-color)">conflicts</span>`
+            ? html`<span
+                class="pill"
+                style="color: var(--warning-color)"
+                title="HA noticed this pattern, but you already have an automation that covers it: ${insight.conflicts_with.join(', ')}"
+              >🔁 already automated</span>`
             : nothing}
           ${insight.explanation
             ? html`<span class="pill" title="LLM explanation available">💬 explained</span>`

@@ -1939,7 +1939,11 @@ class HaInsightsCard extends i {
               >✓ applied</span>`
             : A}
           ${insight.conflicts_with.length > 0
-            ? b `<span class="pill" style="color: var(--warning-color)">conflicts</span>`
+            ? b `<span
+                class="pill"
+                style="color: var(--warning-color)"
+                title="HA noticed this pattern, but you already have an automation that covers it: ${insight.conflicts_with.join(', ')}"
+              >🔁 already automated</span>`
             : A}
           ${insight.explanation
             ? b `<span class="pill" title="LLM explanation available">💬 explained</span>`
