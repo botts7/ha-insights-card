@@ -37,6 +37,14 @@ export interface Insight {
   applied_artifact_id?: string | null;
   /** v0.8: ISO timestamp the 7-day undo window expires. */
   undo_window_expires_at?: string | null;
+  /** v1.1: derived from fingerprint at WS-list time so panel chips can
+   * filter by domain without re-querying. Null if no entity_id was in
+   * the fingerprint (most insights have one). */
+  domain?: string | null;
+  /** v1.1: device_class looked up against the entity registry at
+   * WS-list time. Null when no entity has a class (or the registry
+   * lookup is unavailable). */
+  device_class?: string | null;
 }
 
 export type PrivacyMode = "off" | "local" | "cloud";
@@ -169,6 +177,15 @@ export interface CardConfig {
   group_by?: "area" | "detector" | "none";
   /** v0.8: include already-applied insights in the list (so Undo is reachable). */
   include_applied?: boolean;
+  /** v1.1: panel-only filter chips. Each is a list of selected values;
+   * empty / undefined = "no filter" (all values pass). The card filters
+   * the loaded insight list client-side against these — no extra WS
+   * calls. The dashboard card normally leaves these undefined; the
+   * panel sets them from its own filter UI. */
+  domain_filter?: string[];
+  area_filter?: string[];
+  device_class_filter?: string[];
+  detector_filter?: string[];
 }
 
 /** Subset of the HA `hass` object the card uses. */

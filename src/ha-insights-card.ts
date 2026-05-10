@@ -803,6 +803,18 @@ export class HaInsightsCard extends LitElement {
       // doesn't move when users scroll the dialog body.
       document.body.style.overflow = this._dialogId ? "hidden" : "";
     }
+    if (changedProps.has("_insights")) {
+      // v1.1: emit an event the panel listens for so it can refresh its
+      // chip-filter options + "Showing X of Y" counters. Bubbles +
+      // composed so the panel parent receives it through the shadow DOM.
+      this.dispatchEvent(
+        new CustomEvent("insights-loaded", {
+          detail: { insights: this._insights },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    }
   }
 
   disconnectedCallback(): void {
@@ -1627,9 +1639,28 @@ export class HaInsightsCard extends LitElement {
           : DEFAULT_MAX_ROWS;
     const search = (this._config.search ?? "").trim().toLowerCase();
     const sortBy = this._config.sort_by ?? "confidence";
+    // v1.1 panel-only chip filters. Empty array OR undefined = no filter
+    // for that dimension. Empty value (`null` device_class, `null` area)
+    // passes only if the corresponding filter list is empty.
+    const domainSet = new Set(this._config.domain_filter ?? []);
+    const areaSet = new Set(this._config.area_filter ?? []);
+    const dcSet = new Set(this._config.device_class_filter ?? []);
+    const detSet = new Set(this._config.detector_filter ?? []);
     const filtered = this._insights
       .filter((i) => i.confidence >= min)
-      .filter((i) => !search || i.title.toLowerCase().includes(search));
+      .filter((i) => !search || i.title.toLowerCase().includes(search))
+      .filter((i) =>
+        domainSet.size === 0 || (i.domain != null && domainSet.has(i.domain)),
+      )
+      .filter((i) =>
+        areaSet.size === 0 || (i.area_id != null && areaSet.has(i.area_id)),
+      )
+      .filter(
+        (i) =>
+          dcSet.size === 0 ||
+          (i.device_class != null && dcSet.has(i.device_class)),
+      )
+      .filter((i) => detSet.size === 0 || detSet.has(i.detector));
 
     filtered.sort((a, b) => {
       if (sortBy === "age") {

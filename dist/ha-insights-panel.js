@@ -967,6 +967,16 @@ class HaInsightsCard extends i {
             // doesn't move when users scroll the dialog body.
             document.body.style.overflow = this._dialogId ? "hidden" : "";
         }
+        if (changedProps.has("_insights")) {
+            // v1.1: emit an event the panel listens for so it can refresh its
+            // chip-filter options + "Showing X of Y" counters. Bubbles +
+            // composed so the panel parent receives it through the shadow DOM.
+            this.dispatchEvent(new CustomEvent("insights-loaded", {
+                detail: { insights: this._insights },
+                bubbles: true,
+                composed: true,
+            }));
+        }
     }
     disconnectedCallback() {
         super.disconnectedCallback();
@@ -1759,9 +1769,21 @@ class HaInsightsCard extends i {
                 : DEFAULT_MAX_ROWS;
         const search = (this._config.search ?? "").trim().toLowerCase();
         const sortBy = this._config.sort_by ?? "confidence";
+        // v1.1 panel-only chip filters. Empty array OR undefined = no filter
+        // for that dimension. Empty value (`null` device_class, `null` area)
+        // passes only if the corresponding filter list is empty.
+        const domainSet = new Set(this._config.domain_filter ?? []);
+        const areaSet = new Set(this._config.area_filter ?? []);
+        const dcSet = new Set(this._config.device_class_filter ?? []);
+        const detSet = new Set(this._config.detector_filter ?? []);
         const filtered = this._insights
             .filter((i) => i.confidence >= min)
-            .filter((i) => !search || i.title.toLowerCase().includes(search));
+            .filter((i) => !search || i.title.toLowerCase().includes(search))
+            .filter((i) => domainSet.size === 0 || (i.domain != null && domainSet.has(i.domain)))
+            .filter((i) => areaSet.size === 0 || (i.area_id != null && areaSet.has(i.area_id)))
+            .filter((i) => dcSet.size === 0 ||
+            (i.device_class != null && dcSet.has(i.device_class)))
+            .filter((i) => detSet.size === 0 || detSet.has(i.detector));
         filtered.sort((a, b) => {
             if (sortBy === "age") {
                 // Newest first
@@ -2446,10 +2468,69 @@ class HaInsightsPanel extends i {
         this._backfillBusy = false;
         this._bulkBusy = false;
         this._scanBusy = false;
+        // v1.1 panel filters — chip-style multi-select. Empty array = no filter.
+        // Persisted alongside search/confidence/sort in localStorage.
+        this._filterDomains = [];
+        this._filterAreas = [];
+        this._filterDeviceClasses = [];
+        this._filterDetectors = [];
+        // Total insight count BEFORE chip filters. The card returns the
+        // post-filter count via a property; we maintain the pre-filter count
+        // here for the "Showing X of Y" hint in the panel header.
+        this._totalInsightCount = 0;
+        this._visibleInsightCount = 0;
+        // Snapshot of distinct values present in the loaded insight set.
+        // Drives the chip dropdown options. Refreshed on every list reload.
+        this._availableDomains = [];
+        this._availableAreas = [];
+        this._availableDeviceClasses = [];
+        this._availableDetectors = [];
         this._toast = "";
         this._auditOpen = false;
         this._auditLog = [];
         this._auditBusy = false;
+        this._onInsightsLoaded = (e) => {
+            const detail = e.detail;
+            const insights = detail?.insights ?? [];
+            this._totalInsightCount = insights.length;
+            // Distinct values populate chip dropdowns. Sorted for stable UI.
+            this._availableDomains = [
+                ...new Set(insights.map((i) => i.domain).filter((v) => !!v)),
+            ].sort();
+            this._availableAreas = [
+                ...new Set(insights.map((i) => i.area_id).filter((v) => !!v)),
+            ].sort();
+            this._availableDeviceClasses = [
+                ...new Set(insights.map((i) => i.device_class).filter((v) => !!v)),
+            ].sort();
+            this._availableDetectors = [
+                ...new Set(insights.map((i) => i.detector).filter((v) => !!v)),
+            ].sort();
+            // Compute visible count by re-applying the same filter the card uses
+            // (search + min_confidence + chip filters). Cheap; same N as card.
+            const search = this._search.trim().toLowerCase();
+            const dom = new Set(this._filterDomains);
+            const area = new Set(this._filterAreas);
+            const dc = new Set(this._filterDeviceClasses);
+            const det = new Set(this._filterDetectors);
+            this._visibleInsightCount = insights.filter((i) => {
+                const conf = i.confidence ?? 0;
+                if (conf < this._minConfidence)
+                    return false;
+                const title = (i.title ?? "").toLowerCase();
+                if (search && !title.includes(search))
+                    return false;
+                if (dom.size > 0 && !(typeof i.domain === "string" && dom.has(i.domain)))
+                    return false;
+                if (area.size > 0 && !(typeof i.area_id === "string" && area.has(i.area_id)))
+                    return false;
+                if (dc.size > 0 && !(typeof i.device_class === "string" && dc.has(i.device_class)))
+                    return false;
+                if (det.size > 0 && !(typeof i.detector === "string" && det.has(i.detector)))
+                    return false;
+                return true;
+            }).length;
+        };
     }
     // Persistent filter storage (v0.8 phase 6). Versioned key so future
     // shape changes can ignore old saved state cleanly.
@@ -2648,6 +2729,14 @@ class HaInsightsPanel extends i {
     connectedCallback() {
         super.connectedCallback();
         this._loadFilters();
+        // Bubble-listen for the embedded card's "insights-loaded" event so we
+        // can refresh chip-filter options and the "Showing X of Y" counters
+        // without owning the WS list call ourselves.
+        this.addEventListener("insights-loaded", this._onInsightsLoaded);
+    }
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this.removeEventListener("insights-loaded", this._onInsightsLoaded);
     }
     updated() {
         // Save on any filter change. Cheap (<1 KB stringify) and synchronous.
@@ -2672,6 +2761,18 @@ class HaInsightsPanel extends i {
             }
             if (typeof saved.auditOpen === "boolean")
                 this._auditOpen = saved.auditOpen;
+            if (Array.isArray(saved.filterDomains)) {
+                this._filterDomains = saved.filterDomains.filter((s) => typeof s === "string");
+            }
+            if (Array.isArray(saved.filterAreas)) {
+                this._filterAreas = saved.filterAreas.filter((s) => typeof s === "string");
+            }
+            if (Array.isArray(saved.filterDeviceClasses)) {
+                this._filterDeviceClasses = saved.filterDeviceClasses.filter((s) => typeof s === "string");
+            }
+            if (Array.isArray(saved.filterDetectors)) {
+                this._filterDetectors = saved.filterDetectors.filter((s) => typeof s === "string");
+            }
         }
         catch {
             // Corrupted localStorage entry; fall back to defaults.
@@ -2685,6 +2786,10 @@ class HaInsightsPanel extends i {
                 sortBy: this._sortBy,
                 groupBy: this._groupBy,
                 auditOpen: this._auditOpen,
+                filterDomains: this._filterDomains,
+                filterAreas: this._filterAreas,
+                filterDeviceClasses: this._filterDeviceClasses,
+                filterDetectors: this._filterDetectors,
             }));
         }
         catch {
@@ -2699,7 +2804,9 @@ class HaInsightsPanel extends i {
         this._minConfidence = Number.isFinite(value) ? value : 0;
     }
     get _embeddedCardConfig() {
-        const key = `${this._search}|${this._minConfidence}|${this._sortBy}|${this._groupBy}`;
+        const key = `${this._search}|${this._minConfidence}|${this._sortBy}|${this._groupBy}|` +
+            `${this._filterDomains.join(",")}|${this._filterAreas.join(",")}|` +
+            `${this._filterDeviceClasses.join(",")}|${this._filterDetectors.join(",")}`;
         if (this._cachedCardConfigKey !== key) {
             this._cachedCardConfigKey = key;
             this._cachedCardConfig = {
@@ -2714,6 +2821,10 @@ class HaInsightsPanel extends i {
                 search: this._search,
                 sort_by: this._sortBy,
                 group_by: this._groupBy,
+                domain_filter: this._filterDomains,
+                area_filter: this._filterAreas,
+                device_class_filter: this._filterDeviceClasses,
+                detector_filter: this._filterDetectors,
             };
         }
         return this._cachedCardConfig;
@@ -3051,12 +3162,74 @@ class HaInsightsPanel extends i {
           <option value="area">Group: Area</option>
         </select>
       </div>
+      ${this._renderChipFilters()}
+      <div class="filters" style="padding-top:0; padding-bottom:8px;">
+        <span style="font-size:0.85em; color: var(--secondary-text-color);">
+          Showing ${this._visibleInsightCount} of ${this._totalInsightCount}
+          insight${this._totalInsightCount === 1 ? "" : "s"}
+          ${this._anyChipActive()
+            ? b `<a
+                href="#"
+                style="margin-left:8px;"
+                @click=${(e) => {
+                e.preventDefault();
+                this._clearChipFilters();
+            }}
+                >clear filters</a
+              >`
+            : ""}
+        </span>
+      </div>
       <div class="body">
         ${this._renderCard()}
       </div>
       ${this._renderAuditLog()}
       ${this._toast ? b `<div class="toast">${this._toast}</div>` : ""}
     `;
+    }
+    _anyChipActive() {
+        return (this._filterDomains.length > 0 ||
+            this._filterAreas.length > 0 ||
+            this._filterDeviceClasses.length > 0 ||
+            this._filterDetectors.length > 0);
+    }
+    _clearChipFilters() {
+        this._filterDomains = [];
+        this._filterAreas = [];
+        this._filterDeviceClasses = [];
+        this._filterDetectors = [];
+    }
+    /** Render a row of multi-select dropdowns for domain/area/device_class/
+     *  detector. Each option list is built from the distinct values in the
+     *  currently-loaded insight set so we never offer a filter that returns
+     *  empty results. */
+    _renderChipFilters() {
+        const renderSelect = (label, values, selected, onChange) => {
+            if (values.length === 0)
+                return "";
+            return b `<select
+        aria-label=${label}
+        multiple
+        size="1"
+        style="min-width:110px;"
+        @change=${(e) => {
+                const select = e.target;
+                const picked = Array.from(select.selectedOptions).map((o) => o.value);
+                onChange(picked);
+            }}
+      >
+        <option value="" ?selected=${selected.length === 0}>
+          ${label}: All
+        </option>
+        ${values.map((v) => b `<option value=${v} ?selected=${selected.includes(v)}>${v}</option>`)}
+      </select>`;
+        };
+        return b `<div class="filters" style="padding-top:0;">
+      ${renderSelect("Domain", this._availableDomains, this._filterDomains, (n) => (this._filterDomains = n))}
+      ${renderSelect("Area", this._availableAreas, this._filterAreas, (n) => (this._filterAreas = n))}
+      ${renderSelect("Device class", this._availableDeviceClasses, this._filterDeviceClasses, (n) => (this._filterDeviceClasses = n))}
+      ${renderSelect("Detector", this._availableDetectors, this._filterDetectors, (n) => (this._filterDetectors = n))}
+    </div>`;
     }
     _renderCard() {
         // Declarative binding so Lit reuses the SAME card element across panel
@@ -3105,6 +3278,36 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_scanBusy", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_filterDomains", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_filterAreas", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_filterDeviceClasses", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_filterDetectors", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_totalInsightCount", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_visibleInsightCount", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_availableDomains", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_availableAreas", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_availableDeviceClasses", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_availableDetectors", void 0);
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_toast", void 0);
