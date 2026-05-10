@@ -105,6 +105,41 @@ const SCHEMA = [
         name: "search",
         selector: { text: {} },
     },
+    {
+        name: "include_dismissed",
+        selector: { boolean: {} },
+    },
+    {
+        name: "include_applied",
+        selector: { boolean: {} },
+    },
+    {
+        name: "sort_by",
+        selector: {
+            select: {
+                mode: "dropdown",
+                options: [
+                    { value: "confidence", label: "Confidence (highest first)" },
+                    { value: "age", label: "Age (newest first)" },
+                    { value: "detector", label: "Detector name" },
+                    { value: "area", label: "Area" },
+                ],
+            },
+        },
+    },
+    {
+        name: "group_by",
+        selector: {
+            select: {
+                mode: "dropdown",
+                options: [
+                    { value: "none", label: "No grouping" },
+                    { value: "detector", label: "By detector" },
+                    { value: "area", label: "By area" },
+                ],
+            },
+        },
+    },
 ];
 const LABELS = {
     title: "Card title",
@@ -114,6 +149,10 @@ const LABELS = {
     tts_target_entity_id: "TTS target (media_player) — shows 🔊 Read aloud",
     tts_engine_entity_id: "TTS engine (optional override)",
     search: "Default search filter (case-insensitive title match)",
+    include_dismissed: "Show dismissed insights",
+    include_applied: "Show insights you've already applied",
+    sort_by: "Sort order",
+    group_by: "Group rows by",
 };
 class HaInsightsCardEditor extends i {
     constructor() {
