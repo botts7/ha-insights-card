@@ -19,7 +19,6 @@ import { customElement, property, state } from "lit/decorators.js";
 import "./ha-insights-card";
 import type { AuditLogCall, CardConfig, HassLite } from "./types";
 
-@customElement("ha-insights-panel")
 export class HaInsightsPanel extends LitElement {
   // HA injects these on panel mount.
   @property({ attribute: false }) hass?: HassLite;
@@ -621,6 +620,13 @@ export class HaInsightsPanel extends LitElement {
       ></ha-insights-card>
     `;
   }
+}
+
+// Guard against double-registration — only relevant if a future Lovelace
+// resource ever imports this bundle directly (today only the integration
+// auto-registers it). Cheap to be safe.
+if (!customElements.get("ha-insights-panel")) {
+  customElements.define("ha-insights-panel", HaInsightsPanel);
 }
 
 declare global {

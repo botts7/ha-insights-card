@@ -68,7 +68,6 @@ const LABELS: Record<string, string> = {
   search: "Default search filter (case-insensitive title match)",
 };
 
-@customElement("ha-insights-card-editor")
 export class HaInsightsCardEditor extends LitElement {
   @property({ attribute: false }) hass?: HassLite;
   @state() private _config?: CardConfig;
@@ -119,6 +118,11 @@ export class HaInsightsCardEditor extends LitElement {
       }),
     );
   }
+}
+
+// Guard against double-registration — same rationale as ha-insights-card.
+if (!customElements.get("ha-insights-card-editor")) {
+  customElements.define("ha-insights-card-editor", HaInsightsCardEditor);
 }
 
 declare global {

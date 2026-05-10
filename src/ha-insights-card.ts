@@ -7,7 +7,7 @@
  * card stays a fixed height regardless of how many insights are open.
  */
 import { LitElement, html, css, nothing, type TemplateResult, type PropertyValues } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 
 import "./ha-insights-card-editor";
 import type {
@@ -28,7 +28,6 @@ import type {
 const CARD_PROTOCOL_VERSION = 1;
 const DEFAULT_MAX_ROWS = 8;
 
-@customElement("ha-insights-card")
 export class HaInsightsCard extends LitElement {
   @property({ attribute: false }) hass?: HassLite;
   @state() private _config: CardConfig = { type: "custom:ha-insights-card" };
@@ -2246,9 +2245,21 @@ declare global {
   }
 }
 
+// Guard against double-registration: ha-insights-card.js and
+// ha-insights-panel.js both ship this class (panel imports card to
+// embed it). When the user has the card resource loaded AND the
+// integration auto-registers the panel JS, both bundles try to
+// define("ha-insights-card") and the second throws. The .get() check
+// makes the second load a no-op.
+if (!customElements.get("ha-insights-card")) {
+  customElements.define("ha-insights-card", HaInsightsCard);
+}
+
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "ha-insights-card",
-  name: "HA Insights Card",
-  description: "Shows insights from the HA Insights integration",
-});
+if (!window.customCards.some((c) => c.type === "ha-insights-card")) {
+  window.customCards.push({
+    type: "ha-insights-card",
+    name: "HA Insights Card",
+    description: "Shows insights from the HA Insights integration",
+  });
+}
