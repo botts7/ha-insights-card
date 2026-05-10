@@ -896,16 +896,21 @@ export class HaInsightsCard extends LitElement {
   }
 
   private async _runScanNow(): Promise<void> {
-    if (!this.hass) return;
+    if (!this.hass || this._scanBusy) return;
+    // home_insights/scan_now WS endpoint awaits actual scan completion
+    // and returns counts. call_service was returning the moment the call
+    // queued, so the toast said "complete" instantly while the scan was
+    // still in flight, with no in-progress feedback.
     this._scanBusy = true;
+    this._toast = "Scanning…";
     try {
-      await this.hass.connection.sendMessagePromise({
-        type: "call_service",
-        domain: "ha_insights",
-        service: "scan_now",
-        service_data: {},
-      });
-      this._toast = "Scan complete";
+      const scan = await this.hass.connection.sendMessagePromise<{
+        detectors_run: string[];
+        insights_emitted: number;
+      }>({ type: "home_insights/scan_now" });
+      const noun = scan.insights_emitted === 1 ? "insight" : "insights";
+      this._toast =
+        `Scan complete: ${scan.insights_emitted} new ${noun} from ${scan.detectors_run.length} detectors`;
       // Refresh the list so any new insights show up immediately
       try {
         const result = await this.hass.connection.sendMessagePromise<{

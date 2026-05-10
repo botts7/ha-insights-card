@@ -32,6 +32,7 @@ export class HaInsightsPanel extends LitElement {
   @state() private _groupBy: "area" | "detector" | "none" = "none";
   @state() private _backfillBusy = false;
   @state() private _bulkBusy = false;
+  @state() private _scanBusy = false;
   @state() private _toast = "";
   @state() private _auditOpen = false;
   @state() private _auditLog: AuditLogCall[] = [];
@@ -350,19 +351,29 @@ export class HaInsightsPanel extends LitElement {
   }
 
   private async _runScanNow(): Promise<void> {
-    if (!this.hass) return;
+    if (!this.hass || this._scanBusy) return;
+    // Use the home_insights/scan_now WS endpoint instead of call_service —
+    // it awaits the actual scan completion + returns a count, giving us
+    // real "scan finished" feedback. call_service was returning the moment
+    // the call was queued, so the user got "Scan complete" instantly while
+    // the scan was still running, with no in-progress feedback.
+    this._scanBusy = true;
+    this._showToast("Scanning…");
     try {
-      await this.hass.connection.sendMessagePromise({
-        type: "call_service",
-        domain: "ha_insights",
-        service: "scan_now",
-        service_data: {},
-      });
-      this._showToast("Scan complete");
+      const result = await this.hass.connection.sendMessagePromise<{
+        detectors_run: string[];
+        insights_emitted: number;
+      }>({ type: "home_insights/scan_now" });
+      const noun = result.insights_emitted === 1 ? "insight" : "insights";
+      this._showToast(
+        `Scan complete: ${result.insights_emitted} new ${noun} from ${result.detectors_run.length} detectors`,
+      );
     } catch (err) {
       this._showToast(
         `Scan failed: ${(err as { message?: string }).message ?? String(err)}`,
       );
+    } finally {
+      this._scanBusy = false;
     }
   }
 
@@ -553,10 +564,11 @@ export class HaInsightsPanel extends LitElement {
           </button>
           <button
             class="action"
+            ?disabled=${this._scanBusy}
             title="Run all detectors against the current buffer"
             @click=${this._runScanNow}
           >
-            🔍 Scan now
+            ${this._scanBusy ? "Scanning…" : "🔍 Scan now"}
           </button>
           <button
             class="action"

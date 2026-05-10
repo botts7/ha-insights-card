@@ -1065,17 +1065,19 @@ class HaInsightsCard extends i {
             this._closeDialog();
     }
     async _runScanNow() {
-        if (!this.hass)
+        if (!this.hass || this._scanBusy)
             return;
+        // home_insights/scan_now WS endpoint awaits actual scan completion
+        // and returns counts. call_service was returning the moment the call
+        // queued, so the toast said "complete" instantly while the scan was
+        // still in flight, with no in-progress feedback.
         this._scanBusy = true;
+        this._toast = "Scanning…";
         try {
-            await this.hass.connection.sendMessagePromise({
-                type: "call_service",
-                domain: "ha_insights",
-                service: "scan_now",
-                service_data: {},
-            });
-            this._toast = "Scan complete";
+            const scan = await this.hass.connection.sendMessagePromise({ type: "home_insights/scan_now" });
+            const noun = scan.insights_emitted === 1 ? "insight" : "insights";
+            this._toast =
+                `Scan complete: ${scan.insights_emitted} new ${noun} from ${scan.detectors_run.length} detectors`;
             // Refresh the list so any new insights show up immediately
             try {
                 const result = await this.hass.connection.sendMessagePromise({
@@ -2443,6 +2445,7 @@ class HaInsightsPanel extends i {
         this._groupBy = "none";
         this._backfillBusy = false;
         this._bulkBusy = false;
+        this._scanBusy = false;
         this._toast = "";
         this._auditOpen = false;
         this._auditLog = [];
@@ -2748,19 +2751,25 @@ class HaInsightsPanel extends i {
         }
     }
     async _runScanNow() {
-        if (!this.hass)
+        if (!this.hass || this._scanBusy)
             return;
+        // Use the home_insights/scan_now WS endpoint instead of call_service —
+        // it awaits the actual scan completion + returns a count, giving us
+        // real "scan finished" feedback. call_service was returning the moment
+        // the call was queued, so the user got "Scan complete" instantly while
+        // the scan was still running, with no in-progress feedback.
+        this._scanBusy = true;
+        this._showToast("Scanning…");
         try {
-            await this.hass.connection.sendMessagePromise({
-                type: "call_service",
-                domain: "ha_insights",
-                service: "scan_now",
-                service_data: {},
-            });
-            this._showToast("Scan complete");
+            const result = await this.hass.connection.sendMessagePromise({ type: "home_insights/scan_now" });
+            const noun = result.insights_emitted === 1 ? "insight" : "insights";
+            this._showToast(`Scan complete: ${result.insights_emitted} new ${noun} from ${result.detectors_run.length} detectors`);
         }
         catch (err) {
             this._showToast(`Scan failed: ${err.message ?? String(err)}`);
+        }
+        finally {
+            this._scanBusy = false;
         }
     }
     /** Bulk-apply all currently-visible insights (after the panel's filters
@@ -2930,10 +2939,11 @@ class HaInsightsPanel extends i {
           </button>
           <button
             class="action"
+            ?disabled=${this._scanBusy}
             title="Run all detectors against the current buffer"
             @click=${this._runScanNow}
           >
-            🔍 Scan now
+            ${this._scanBusy ? "Scanning…" : "🔍 Scan now"}
           </button>
           <button
             class="action"
@@ -3035,6 +3045,9 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_bulkBusy", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_scanBusy", void 0);
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_toast", void 0);
