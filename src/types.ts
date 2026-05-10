@@ -53,6 +53,19 @@ export interface ExplainResult {
   explanation: string;
   bytes_sent: number;
   bytes_received: number;
+  /** v0.9 phase 7: agent that responded after failover. */
+  chosen_agent_id?: string | null;
+  /** v1.0 review #2: per-attempt audit rows. */
+  attempts?: AttemptAudit[];
+}
+
+export interface AttemptAudit {
+  /** Agent that handled this attempt. Null when HA's default agent
+   * (no LLM Conversation entity installed) was used. */
+  chosen_agent_id: string | null;
+  bytes_sent: number;
+  bytes_received: number;
+  success: boolean;
 }
 
 export interface RefineResult {
@@ -65,6 +78,11 @@ export interface RefineResult {
    * this back on follow-up Refines turns the exchange into a multi-turn
    * dialogue. Null when the agent didn't return one. */
   conversation_id?: string | null;
+  /** v1.0 review #2: per-attempt audit rows when failover walked
+   * multiple agents. The card can show "tried X, fell over to Y". */
+  attempts?: AttemptAudit[];
+  /** v0.9 phase 7: agent that actually responded after failover. */
+  chosen_agent_id?: string | null;
 }
 
 export interface TestActionsResult {
