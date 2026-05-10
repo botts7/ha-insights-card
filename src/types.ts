@@ -50,6 +50,20 @@ export interface Insight {
    * here it's "this entity is used somewhere in automation X" for
    * context. Empty list when none. Card surfaces as a small chip. */
   referenced_in_automations?: string[];
+  /** v1.1: structured links for the conflicts_with pill — card renders
+   * each as a clickable chip that opens the automation editor. */
+  conflicts_with_links?: AutomationLink[];
+  /** v1.1: structured links for the referenced_in_automations pill. */
+  referenced_in_automations_links?: AutomationLink[];
+}
+
+export interface AutomationLink {
+  /** Visible label (alias from automation YAML, or id if no alias). */
+  alias: string;
+  /** Automation ID — only present when the automation has one. */
+  id?: string;
+  /** Deep-link URL into HA's automation editor. Only present when id is set. */
+  url?: string;
 }
 
 export type PrivacyMode = "off" | "local" | "cloud";

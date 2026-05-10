@@ -1824,20 +1824,22 @@ export class HaInsightsCard extends LitElement {
               >✓ applied</span>`
             : nothing}
           ${insight.conflicts_with.length > 0
-            ? html`<span
-                class="pill"
-                style="color: var(--warning-color)"
-                title="HA noticed this pattern, but you already have an automation that covers it: ${insight.conflicts_with.join(', ')}"
-              >🔁 already automated</span>`
+            ? this._renderAutomationPill(
+                "🔁 already automated",
+                "var(--warning-color)",
+                "HA noticed this pattern, but you already have an automation that covers it",
+                insight.conflicts_with_links ?? insight.conflicts_with.map((a) => ({ alias: a })),
+              )
             : nothing}
           ${insight.referenced_in_automations &&
           insight.referenced_in_automations.length > 0 &&
           insight.conflicts_with.length === 0
-            ? html`<span
-                class="pill"
-                style="color: var(--secondary-text-color)"
-                title="The entities in this insight are referenced in your existing automation(s): ${insight.referenced_in_automations.join(', ')}"
-              >🤖 in ${insight.referenced_in_automations.length} ${insight.referenced_in_automations.length === 1 ? "automation" : "automations"}</span>`
+            ? this._renderAutomationPill(
+                `🤖 in ${insight.referenced_in_automations.length} ${insight.referenced_in_automations.length === 1 ? "automation" : "automations"}`,
+                "var(--secondary-text-color)",
+                "The entities in this insight are referenced in your existing automation(s)",
+                insight.referenced_in_automations_links ?? insight.referenced_in_automations.map((a) => ({ alias: a })),
+              )
             : nothing}
           ${insight.explanation
             ? html`<span class="pill" title="LLM explanation available">💬 explained</span>`
@@ -1851,6 +1853,35 @@ export class HaInsightsCard extends LitElement {
     if (confidence >= 0.8) return "confidence-high";
     if (confidence >= 0.5) return "confidence-medium";
     return "confidence-low";
+  }
+
+  /** Render an "🔁 already automated" or "🤖 in N automations" pill
+   *  with a click-to-edit popover. Hovering shows the automation
+   *  alias(es); clicking opens HA's automation editor for the linked
+   *  one (or the first one if multiple). When no id is known (rare —
+   *  some legacy YAML automations don't have one), the pill is plain
+   *  text with the alias(es) in the tooltip — same as before. */
+  private _renderAutomationPill(
+    label: string,
+    color: string,
+    leadText: string,
+    links: Array<{ alias: string; id?: string; url?: string }>,
+  ): TemplateResult {
+    const aliases = links.map((l) => l.alias);
+    const tooltip = `${leadText}: ${aliases.join(", ")}\n\nClick to open in the automation editor.`;
+    // First link with a URL becomes the click target. If none has a
+    // URL, fall back to the dashboard so the user can find the
+    // automation by alias.
+    const firstWithUrl = links.find((l) => l.url);
+    const url = firstWithUrl?.url ?? "/config/automations/dashboard";
+    return html`<a
+      class="pill"
+      href=${url}
+      target="_top"
+      style="color: ${color}; text-decoration: none; cursor: pointer;"
+      title=${tooltip}
+      @click=${(e: Event) => e.stopPropagation()}
+    >${label}</a>`;
   }
 
   /** Render insight.created_at as a relative-time pill ("3h ago" / "yesterday").
