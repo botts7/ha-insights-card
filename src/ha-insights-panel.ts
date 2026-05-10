@@ -290,16 +290,26 @@ export class HaInsightsPanel extends LitElement {
     this._minConfidence = Number.isFinite(value) ? value : 0;
   }
 
+  /** Memoized so Lit's `.config=${...}` binding keeps stable identity across
+   *  panel re-renders. Without this, every hass update creates a fresh
+   *  config object → setConfig → reactive @state churn on the card. */
+  private _cachedCardConfig?: CardConfig;
+  private _cachedCardConfigKey?: string;
   private get _embeddedCardConfig(): CardConfig {
-    return {
-      type: "custom:ha-insights-card",
-      title: this._search ? `Insights matching "${this._search}"` : "All insights",
-      max_rows: 9999,
-      min_confidence: this._minConfidence,
-      search: this._search,
-      sort_by: this._sortBy,
-      group_by: this._groupBy,
-    };
+    const key = `${this._search}|${this._minConfidence}|${this._sortBy}|${this._groupBy}`;
+    if (this._cachedCardConfigKey !== key) {
+      this._cachedCardConfigKey = key;
+      this._cachedCardConfig = {
+        type: "custom:ha-insights-card",
+        title: this._search ? `Insights matching "${this._search}"` : "All insights",
+        max_rows: 9999,
+        min_confidence: this._minConfidence,
+        search: this._search,
+        sort_by: this._sortBy,
+        group_by: this._groupBy,
+      };
+    }
+    return this._cachedCardConfig!;
   }
 
   private async _runBackfill(): Promise<void> {

@@ -2723,15 +2723,20 @@ class HaInsightsPanel extends i {
         this._minConfidence = Number.isFinite(value) ? value : 0;
     }
     get _embeddedCardConfig() {
-        return {
-            type: "custom:ha-insights-card",
-            title: this._search ? `Insights matching "${this._search}"` : "All insights",
-            max_rows: 9999,
-            min_confidence: this._minConfidence,
-            search: this._search,
-            sort_by: this._sortBy,
-            group_by: this._groupBy,
-        };
+        const key = `${this._search}|${this._minConfidence}|${this._sortBy}|${this._groupBy}`;
+        if (this._cachedCardConfigKey !== key) {
+            this._cachedCardConfigKey = key;
+            this._cachedCardConfig = {
+                type: "custom:ha-insights-card",
+                title: this._search ? `Insights matching "${this._search}"` : "All insights",
+                max_rows: 9999,
+                min_confidence: this._minConfidence,
+                search: this._search,
+                sort_by: this._sortBy,
+                group_by: this._groupBy,
+            };
+        }
+        return this._cachedCardConfig;
     }
     async _runBackfill() {
         if (!this.hass)
