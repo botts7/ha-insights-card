@@ -45,6 +45,11 @@ export interface Insight {
    * WS-list time. Null when no entity has a class (or the registry
    * lookup is unavailable). */
   device_class?: string | null;
+  /** v1.1: list of existing-automation names/ids that reference any
+   * of the entities in this insight. Looser than `conflicts_with` —
+   * here it's "this entity is used somewhere in automation X" for
+   * context. Empty list when none. Card surfaces as a small chip. */
+  referenced_in_automations?: string[];
 }
 
 export type PrivacyMode = "off" | "local" | "cloud";

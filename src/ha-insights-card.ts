@@ -1830,6 +1830,15 @@ export class HaInsightsCard extends LitElement {
                 title="HA noticed this pattern, but you already have an automation that covers it: ${insight.conflicts_with.join(', ')}"
               >🔁 already automated</span>`
             : nothing}
+          ${insight.referenced_in_automations &&
+          insight.referenced_in_automations.length > 0 &&
+          insight.conflicts_with.length === 0
+            ? html`<span
+                class="pill"
+                style="color: var(--secondary-text-color)"
+                title="The entities in this insight are referenced in your existing automation(s): ${insight.referenced_in_automations.join(', ')}"
+              >🤖 in ${insight.referenced_in_automations.length} ${insight.referenced_in_automations.length === 1 ? "automation" : "automations"}</span>`
+            : nothing}
           ${insight.explanation
             ? html`<span class="pill" title="LLM explanation available">💬 explained</span>`
             : nothing}
