@@ -2705,7 +2705,11 @@ class HaInsightsPanel extends i {
             this._cachedCardConfig = {
                 type: "custom:ha-insights-card",
                 title: this._search ? `Insights matching "${this._search}"` : "All insights",
-                max_rows: 9999,
+                // Cap at 200 rows even on the panel. With 1000+ insights the
+                // browser locks up rendering all of them; if a user really has
+                // 1000+ they should use search/filter to narrow first. The card
+                // shows a "showing N of M" hint when the list is truncated.
+                max_rows: 200,
                 min_confidence: this._minConfidence,
                 search: this._search,
                 sort_by: this._sortBy,
@@ -2763,13 +2767,50 @@ class HaInsightsPanel extends i {
         try {
             const result = await this.hass.connection.sendMessagePromise({ type: "home_insights/scan_now" });
             const noun = result.insights_emitted === 1 ? "insight" : "insights";
-            this._showToast(`Scan complete: ${result.insights_emitted} new ${noun} from ${result.detectors_run.length} detectors`);
+            const verb = result.canceled ? "canceled" : "complete";
+            this._showToast(`Scan ${verb}: ${result.insights_emitted} new ${noun} from ${result.detectors_run.length} detectors`);
         }
         catch (err) {
             this._showToast(`Scan failed: ${err.message ?? String(err)}`);
         }
         finally {
             this._scanBusy = false;
+        }
+    }
+    async _cancelScan() {
+        if (!this.hass || !this._scanBusy)
+            return;
+        try {
+            await this.hass.connection.sendMessagePromise({
+                type: "home_insights/cancel_scan",
+            });
+            this._showToast("Stopping scan…");
+        }
+        catch (err) {
+            this._showToast(`Cancel failed: ${err.message ?? String(err)}`);
+        }
+    }
+    async _purgeAllInsights() {
+        if (!this.hass)
+            return;
+        const confirmed = window.confirm("Delete ALL stored insights from this integration?\n\n" +
+            "This wipes the insights table + outbound LLM call audit log. " +
+            "Applied-automation history and pseudonym map are preserved. " +
+            "Useful when a noisy scan filled the panel with thousands of " +
+            "spurious insights — clean slate, click Run Scan Now again.");
+        if (!confirmed)
+            return;
+        try {
+            await this.hass.connection.sendMessagePromise({
+                type: "call_service",
+                domain: "ha_insights",
+                service: "purge_observations",
+                service_data: {},
+            });
+            this._showToast("Purged all insights");
+        }
+        catch (err) {
+            this._showToast(`Purge failed: ${err.message ?? String(err)}`);
         }
     }
     /** Bulk-apply all currently-visible insights (after the panel's filters
@@ -2944,6 +2985,22 @@ class HaInsightsPanel extends i {
             @click=${this._runScanNow}
           >
             ${this._scanBusy ? "Scanning…" : "🔍 Scan now"}
+          </button>
+          ${this._scanBusy
+            ? b `<button
+                class="action"
+                title="Stop the in-flight scan after the current detector"
+                @click=${this._cancelScan}
+              >
+                ⏹ Stop
+              </button>`
+            : ""}
+          <button
+            class="action"
+            title="Delete every stored insight (useful when a noisy scan filled the list)"
+            @click=${this._purgeAllInsights}
+          >
+            🗑 Purge all
           </button>
           <button
             class="action"
