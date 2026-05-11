@@ -2788,14 +2788,22 @@ class HaInsightsCard extends i {
           ${m.busy
             ? b `<div style="padding: 12px;">⏳ Working…</div>`
             : A}
-          ${m.originalYaml && !m.refinedYaml
+          ${!m.refinedYaml && !m.busy
             ? b `
                 <div style="margin-bottom: 8px; font-weight: 500;">
                   Current automation
                 </div>
-                <pre
-                  style="max-height: 280px; overflow: auto; background: var(--code-background-color, rgba(0,0,0,0.04)); padding: 12px; border-radius: 4px; font-size: 0.85em;"
-                >${m.originalYaml}</pre>
+                ${m.originalYaml
+                ? b `<pre
+                      style="max-height: 280px; overflow: auto; background: var(--code-background-color, rgba(0,0,0,0.04)); padding: 12px; border-radius: 4px; font-size: 0.85em;"
+                    >${m.originalYaml}</pre>`
+                : b `<div
+                      style="padding: 10px; margin-bottom: 8px; background: rgba(255, 152, 0, 0.10); border-left: 3px solid var(--warning-color, #ff9800); border-radius: 4px; font-size: 0.9em;"
+                    >⚠️ Couldn't load the automation's YAML. HA's
+                    automation registry returned an empty record for
+                    this id. You can still describe a change below,
+                    but the LLM won't have the existing YAML for
+                    context — quality of the suggestion will be lower.</div>`}
                 <div style="margin-top: 16px; margin-bottom: 8px; font-weight: 500;">
                   What should change?
                 </div>
