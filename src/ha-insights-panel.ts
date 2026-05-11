@@ -624,6 +624,38 @@ export class HaInsightsPanel extends LitElement {
     }
   }
 
+  /** Force the browser to pick up a freshly-deployed panel/card bundle.
+   *  Two-step: (1) ask the integration to re-register the panel with a
+   *  fresh ?v= mtime/size signature so the URL changes; (2) hard-reload
+   *  the window so the browser bypasses its HTTP cache + service worker.
+   *  Without (1), the URL stays the same and the browser SW keeps the
+   *  old bundle. Without (2), the new ?v= is queued but the current tab
+   *  is still running old code. Both pieces matter. */
+  private async _reloadUi(): Promise<void> {
+    if (!this.hass) return;
+    try {
+      await this.hass.connection.sendMessagePromise({
+        type: "call_service",
+        domain: "ha_insights",
+        service: "reload_ui",
+        service_data: {},
+      });
+      this._showToast("Reloading bundle…");
+      // Give the toast a tick to paint, then force a cache-bypassing
+      // reload. `location.reload(true)` is deprecated; the modern path
+      // is `location.reload()` after navigating to a query-busted URL.
+      window.setTimeout(() => {
+        const url = new URL(window.location.href);
+        url.searchParams.set("_reload", String(Date.now()));
+        window.location.replace(url.toString());
+      }, 200);
+    } catch (err) {
+      this._showToast(
+        `Reload failed: ${(err as { message?: string }).message ?? String(err)}`,
+      );
+    }
+  }
+
   private async _purgeAllInsights(): Promise<void> {
     if (!this.hass) return;
     const confirmed = window.confirm(
@@ -852,6 +884,13 @@ export class HaInsightsPanel extends LitElement {
                 ⏹ Stop
               </button>`
             : ""}
+          <button
+            class="action"
+            title="Re-register the panel with a fresh cache-bust + force browser reload — use after deploying a new ha-insights-card.js / panel.js"
+            @click=${this._reloadUi}
+          >
+            🔄 Reload UI
+          </button>
           <button
             class="action"
             title="Delete every stored insight (useful when a noisy scan filled the list)"
