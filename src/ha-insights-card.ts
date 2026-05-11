@@ -77,6 +77,9 @@ export class HaInsightsCard extends LitElement {
    *  user clicked the ✏️ icon on a 🔁/🤖 pill. Carries the loaded
    *  automation, the in-progress feedback, and the refined diff after
    *  the LLM round-trip. Set undefined while closed. */
+  /** v1.1: insight ids whose cohort_members list is currently shown
+   *  expanded. Click "▸ show N" to toggle. Per-row state; not persisted. */
+  @state() private _expandedCohorts: Set<string> = new Set();
   @state() private _refineAutomationModal?: {
     automationId: string;
     alias: string;
@@ -327,6 +330,21 @@ export class HaInsightsCard extends LitElement {
     }
     .pill-action:hover {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.06));
+    }
+    /* v1.1: cohort expansion — list of merged entity_ids */
+    .cohort-members {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .cohort-member-chip {
+      font-family: var(--code-font-family, monospace);
+      font-size: 0.8em;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+      color: var(--secondary-text-color);
     }
     /* Confidence pill color coding (v0.7) */
     .pill.confidence-high {
@@ -1844,9 +1862,33 @@ export class HaInsightsCard extends LitElement {
     const confidencePct = Math.round(insight.confidence * 100);
     const confidenceClass = this._confidenceClass(insight.confidence);
     const ageLabel = this._formatAge(insight.created_at);
+    const expanded = this._expandedCohorts.has(insight.id);
+    const members = insight.cohort_members ?? [];
+    const hasCohort = members.length > 0;
     return html`
       <div class="row" @click=${() => this._openDialog(insight.id)}>
-        <div class="row-title">${insight.title}</div>
+        <div class="row-title">
+          ${insight.title}
+          ${hasCohort
+            ? html` <button
+                class="pill-action"
+                style="margin-left:6px;"
+                title="${expanded ? "Hide" : "Show"} the ${members.length} cohort members"
+                @click=${(e: Event) => {
+                  e.stopPropagation();
+                  this._toggleCohortExpansion(insight.id);
+                }}
+              >${expanded ? "▾ hide" : `▸ show ${members.length}`}</button>`
+            : nothing}
+        </div>
+        ${hasCohort && expanded
+          ? html`<div
+              class="cohort-members"
+              @click=${(e: Event) => e.stopPropagation()}
+            >${members.map(
+              (m) => html`<span class="cohort-member-chip">${m}</span>`,
+            )}</div>`
+          : nothing}
         <div class="row-meta">
           <span class="pill ${confidenceClass}">confidence ${confidencePct}%</span>
           <span class="pill">${insight.detector}</span>
@@ -1879,6 +1921,13 @@ export class HaInsightsCard extends LitElement {
                 "The entities in this insight are referenced in your existing automation(s)",
                 insight.referenced_in_automations_links ?? insight.referenced_in_automations.map((a) => ({ alias: a })),
               )
+            : nothing}
+          ${insight.external_source
+            ? html`<span
+                class="pill"
+                style="color: var(--secondary-text-color); background: rgba(33, 150, 243, 0.10);"
+                title="HA noticed this pattern but the schedule is managed in the vendor app (${insight.external_source}) — not in HA. Creating a new HA automation likely won't help."
+              >🏷️ managed externally (${insight.external_source})</span>`
             : nothing}
           ${insight.explanation
             ? html`<span class="pill" title="LLM explanation available">💬 explained</span>`
@@ -1978,6 +2027,16 @@ export class HaInsightsCard extends LitElement {
         error: `Could not load automation: ${this._asMessage(err)}`,
       };
     }
+  }
+
+  private _toggleCohortExpansion(insightId: string): void {
+    const next = new Set(this._expandedCohorts);
+    if (next.has(insightId)) {
+      next.delete(insightId);
+    } else {
+      next.add(insightId);
+    }
+    this._expandedCohorts = next;
   }
 
   private _closeRefineAutomationModal(): void {

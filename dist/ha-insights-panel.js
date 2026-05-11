@@ -248,6 +248,14 @@ class HaInsightsCard extends i {
         /** Per-insight redaction preview state — shown when user clicks "What gets sent?" */
         this._previewById = new Map();
         this._previewBusy = false;
+        /** v1.1 Refine-existing-automation modal state. Separate from the
+         *  per-insight dialog because we're not in an insight context here —
+         *  user clicked the ✏️ icon on a 🔁/🤖 pill. Carries the loaded
+         *  automation, the in-progress feedback, and the refined diff after
+         *  the LLM round-trip. Set undefined while closed. */
+        /** v1.1: insight ids whose cohort_members list is currently shown
+         *  expanded. Click "▸ show N" to toggle. Per-row state; not persisted. */
+        this._expandedCohorts = new Set();
         /**
          * v0.5: rows that fit in the card's currently-rendered height. Updated
          * by ResizeObserver. Used as the row cap when the user hasn't set
@@ -480,6 +488,21 @@ class HaInsightsCard extends i {
     }
     .pill-action:hover {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.06));
+    }
+    /* v1.1: cohort expansion — list of merged entity_ids */
+    .cohort-members {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .cohort-member-chip {
+      font-family: var(--code-font-family, monospace);
+      font-size: 0.8em;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+      color: var(--secondary-text-color);
     }
     /* Confidence pill color coding (v0.7) */
     .pill.confidence-high {
@@ -1940,9 +1963,31 @@ class HaInsightsCard extends i {
         const confidencePct = Math.round(insight.confidence * 100);
         const confidenceClass = this._confidenceClass(insight.confidence);
         const ageLabel = this._formatAge(insight.created_at);
+        const expanded = this._expandedCohorts.has(insight.id);
+        const members = insight.cohort_members ?? [];
+        const hasCohort = members.length > 0;
         return b `
       <div class="row" @click=${() => this._openDialog(insight.id)}>
-        <div class="row-title">${insight.title}</div>
+        <div class="row-title">
+          ${insight.title}
+          ${hasCohort
+            ? b ` <button
+                class="pill-action"
+                style="margin-left:6px;"
+                title="${expanded ? "Hide" : "Show"} the ${members.length} cohort members"
+                @click=${(e) => {
+                e.stopPropagation();
+                this._toggleCohortExpansion(insight.id);
+            }}
+              >${expanded ? "▾ hide" : `▸ show ${members.length}`}</button>`
+            : A}
+        </div>
+        ${hasCohort && expanded
+            ? b `<div
+              class="cohort-members"
+              @click=${(e) => e.stopPropagation()}
+            >${members.map((m) => b `<span class="cohort-member-chip">${m}</span>`)}</div>`
+            : A}
         <div class="row-meta">
           <span class="pill ${confidenceClass}">confidence ${confidencePct}%</span>
           <span class="pill">${insight.detector}</span>
@@ -1965,6 +2010,13 @@ class HaInsightsCard extends i {
             insight.referenced_in_automations.length > 0 &&
             insight.conflicts_with.length === 0
             ? this._renderAutomationPill(`🤖 in ${insight.referenced_in_automations.length} ${insight.referenced_in_automations.length === 1 ? "automation" : "automations"}`, "var(--secondary-text-color)", "The entities in this insight are referenced in your existing automation(s)", insight.referenced_in_automations_links ?? insight.referenced_in_automations.map((a) => ({ alias: a })))
+            : A}
+          ${insight.external_source
+            ? b `<span
+                class="pill"
+                style="color: var(--secondary-text-color); background: rgba(33, 150, 243, 0.10);"
+                title="HA noticed this pattern but the schedule is managed in the vendor app (${insight.external_source}) — not in HA. Creating a new HA automation likely won't help."
+              >🏷️ managed externally (${insight.external_source})</span>`
             : A}
           ${insight.explanation
             ? b `<span class="pill" title="LLM explanation available">💬 explained</span>`
@@ -2049,6 +2101,16 @@ class HaInsightsCard extends i {
                 error: `Could not load automation: ${this._asMessage(err)}`,
             };
         }
+    }
+    _toggleCohortExpansion(insightId) {
+        const next = new Set(this._expandedCohorts);
+        if (next.has(insightId)) {
+            next.delete(insightId);
+        }
+        else {
+            next.add(insightId);
+        }
+        this._expandedCohorts = next;
     }
     _closeRefineAutomationModal() {
         this._refineAutomationModal = undefined;
@@ -2718,6 +2780,9 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_testResults", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_expandedCohorts", void 0);
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_refineAutomationModal", void 0);

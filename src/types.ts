@@ -55,6 +55,20 @@ export interface Insight {
   conflicts_with_links?: AutomationLink[];
   /** v1.1: structured links for the referenced_in_automations pill. */
   referenced_in_automations_links?: AutomationLink[];
+  /** v1.1: when set, this entity is from an integration that commonly
+   * carries DEVICE-side schedules (Tuya app, eWeLink app, Mi Home,
+   * Roborock, PetKit, etc.) and no HA automation references it. Card
+   * surfaces a "🏷️ managed externally" pill so the user knows we noticed
+   * the pattern but suggesting a new HA automation would be wrong —
+   * they already have the schedule in the vendor app. */
+  external_source?: string | null;
+  /** v1.1: full list of merged entity_ids when this insight is a
+   * cohort representative (title has "(+N similar entities)" suffix).
+   * Card uses this to render an expand/collapse toggle. */
+  cohort_members?: string[];
+  /** v1.1: friendly group label shown when expanding the cohort,
+   * e.g. "binary_sensor.home_nvr_*" or "scene.evening_garden". */
+  cohort_label?: string | null;
 }
 
 export interface AutomationLink {
