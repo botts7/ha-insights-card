@@ -1820,7 +1820,14 @@ export class HaInsightsCard extends LitElement {
         /\b[a-z_]+\.[A-Za-z0-9_]+\b/g,
         "<E>",
       );
-      const key = `${r.detector}|${r.kind}|${norm}`;
+      // Include the row's domain in the bucket key so mixed-domain
+      // titles never lump together. Without this split, an NVR with 35
+      // binary_sensor offline rows + 11 switch offline rows all
+      // bucketed into one mixed-domain bucket and then bailed out at
+      // the "Mixed domains — keep separate" branch below, leaving the
+      // user with 46 individual rows instead of 2 cohort representatives.
+      const domain = r.domain ?? "";
+      const key = `${r.detector}|${r.kind}|${norm}|${domain}`;
       const arr = buckets.get(key);
       if (arr) arr.push(r);
       else buckets.set(key, [r]);
