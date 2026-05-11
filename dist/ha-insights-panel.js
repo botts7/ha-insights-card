@@ -1829,6 +1829,8 @@ class HaInsightsCard extends i {
         const areaSet = new Set(this._config.area_filter ?? []);
         const dcSet = new Set(this._config.device_class_filter ?? []);
         const detSet = new Set(this._config.detector_filter ?? []);
+        const floorSet = new Set(this._config.floor_filter ?? []);
+        const integSet = new Set(this._config.integration_filter ?? []);
         const filtered = this._insights
             .filter((i) => i.confidence >= min)
             .filter((i) => !search || i.title.toLowerCase().includes(search))
@@ -1836,7 +1838,10 @@ class HaInsightsCard extends i {
             .filter((i) => areaSet.size === 0 || (i.area_id != null && areaSet.has(i.area_id)))
             .filter((i) => dcSet.size === 0 ||
             (i.device_class != null && dcSet.has(i.device_class)))
-            .filter((i) => detSet.size === 0 || detSet.has(i.detector));
+            .filter((i) => detSet.size === 0 || detSet.has(i.detector))
+            .filter((i) => floorSet.size === 0 || (i.floor_id != null && floorSet.has(i.floor_id)))
+            .filter((i) => integSet.size === 0 ||
+            (i.integration != null && integSet.has(i.integration)));
         filtered.sort((a, b) => {
             if (sortBy === "age") {
                 // Newest first
@@ -1961,11 +1966,21 @@ class HaInsightsCard extends i {
             return [["", rows]];
         const buckets = new Map();
         for (const row of rows) {
+            // Prefer the friendly name when one is available — the area_id /
+            // floor_id are opaque GUIDs in the registry, useless as section
+            // headers. integration is already a label-ish string ("hue",
+            // "tuya", "mqtt"). Fall back to "(no area)" / "(no floor)" /
+            // "(no integration)" so a single bucket collects un-tagged rows
+            // and the user can spot what slipped through the registry.
             const groupKey = key === "area"
-                ? row.area_id ?? "(no area)"
-                : key === "detector"
-                    ? row.detector
-                    : "";
+                ? row.area_name ?? row.area_id ?? "(no area)"
+                : key === "floor"
+                    ? row.floor_name ?? row.floor_id ?? "(no floor)"
+                    : key === "integration"
+                        ? row.integration ?? "(no integration)"
+                        : key === "detector"
+                            ? row.detector
+                            : "";
             const existing = buckets.get(groupKey);
             if (existing)
                 existing.push(row);
@@ -2928,6 +2943,9 @@ class HaInsightsPanel extends i {
         this._filterAreas = [];
         this._filterDeviceClasses = [];
         this._filterDetectors = [];
+        // v1.2 Phase 5: floor + integration axes alongside domain/area/dc/detector.
+        this._filterFloors = [];
+        this._filterIntegrations = [];
         // Total insight count BEFORE chip filters. The card returns the
         // post-filter count via a property; we maintain the pre-filter count
         // here for the "Showing X of Y" hint in the panel header.
@@ -2939,6 +2957,17 @@ class HaInsightsPanel extends i {
         this._availableAreas = [];
         this._availableDeviceClasses = [];
         this._availableDetectors = [];
+        // v1.2 Phase 5
+        this._availableFloors = [];
+        this._availableIntegrations = [];
+        // Area-id ↔ display-name maps populated from the loaded insight set
+        // so chip dropdowns and the per-detector header show friendly labels
+        // ("Living Room") instead of opaque registry ids.
+        this._areaNameById = {};
+        this._floorNameById = {};
+        // Per-detector counts displayed as small chips in the header.
+        // Populated from the SAME insight set as the filter chip dropdowns.
+        this._detectorCounts = {};
         this._toast = "";
         this._auditOpen = false;
         this._auditLog = [];
@@ -2960,6 +2989,35 @@ class HaInsightsPanel extends i {
             this._availableDetectors = [
                 ...new Set(insights.map((i) => i.detector).filter((v) => !!v)),
             ].sort();
+            this._availableFloors = [
+                ...new Set(insights.map((i) => i.floor_id).filter((v) => !!v)),
+            ].sort();
+            this._availableIntegrations = [
+                ...new Set(insights.map((i) => i.integration).filter((v) => !!v)),
+            ].sort();
+            // Build id → friendly-name lookups from the loaded list. The card
+            // already carries area_name + floor_name on each row when set;
+            // collecting them here keeps chip labels readable.
+            const areaNames = {};
+            const floorNames = {};
+            for (const i of insights) {
+                if (typeof i.area_id === "string" && typeof i.area_name === "string") {
+                    areaNames[i.area_id] = i.area_name;
+                }
+                if (typeof i.floor_id === "string" && typeof i.floor_name === "string") {
+                    floorNames[i.floor_id] = i.floor_name;
+                }
+            }
+            this._areaNameById = areaNames;
+            this._floorNameById = floorNames;
+            // Per-detector counts for the header chip strip.
+            const counts = {};
+            for (const i of insights) {
+                const d = i.detector;
+                if (typeof d === "string")
+                    counts[d] = (counts[d] ?? 0) + 1;
+            }
+            this._detectorCounts = counts;
             // Compute visible count by re-applying the same filter the card uses
             // (search + min_confidence + chip filters). Cheap; same N as card.
             const search = this._search.trim().toLowerCase();
@@ -2967,6 +3025,8 @@ class HaInsightsPanel extends i {
             const area = new Set(this._filterAreas);
             const dc = new Set(this._filterDeviceClasses);
             const det = new Set(this._filterDetectors);
+            const floor = new Set(this._filterFloors);
+            const integ = new Set(this._filterIntegrations);
             this._visibleInsightCount = insights.filter((i) => {
                 const conf = i.confidence ?? 0;
                 if (conf < this._minConfidence)
@@ -2982,6 +3042,12 @@ class HaInsightsPanel extends i {
                     return false;
                 if (det.size > 0 && !(typeof i.detector === "string" && det.has(i.detector)))
                     return false;
+                if (floor.size > 0 && !(typeof i.floor_id === "string" && floor.has(i.floor_id)))
+                    return false;
+                if (integ.size > 0 &&
+                    !(typeof i.integration === "string" && integ.has(i.integration))) {
+                    return false;
+                }
                 return true;
             }).length;
         };
@@ -3171,6 +3237,43 @@ class HaInsightsPanel extends i {
       white-space: nowrap;
       font-size: 0.8em;
     }
+    .detector-counts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .detector-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+      color: var(--primary-text-color);
+      font-size: 0.78em;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .detector-chip:hover {
+      background: var(--divider-color, rgba(0, 0, 0, 0.08));
+    }
+    .detector-chip.is-active {
+      background: var(--primary-color);
+      color: var(--text-primary-color, white);
+      border-color: var(--primary-color);
+    }
+    .detector-chip-count {
+      background: rgba(0, 0, 0, 0.12);
+      padding: 0 6px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 0.85em;
+    }
+    .detector-chip.is-active .detector-chip-count {
+      background: rgba(255, 255, 255, 0.25);
+    }
     @media (max-width: 600px) {
       .header,
       .filters,
@@ -3210,7 +3313,11 @@ class HaInsightsPanel extends i {
             if (saved.sortBy === "confidence" || saved.sortBy === "age" || saved.sortBy === "detector") {
                 this._sortBy = saved.sortBy;
             }
-            if (saved.groupBy === "none" || saved.groupBy === "detector" || saved.groupBy === "area") {
+            if (saved.groupBy === "none" ||
+                saved.groupBy === "detector" ||
+                saved.groupBy === "area" ||
+                saved.groupBy === "floor" ||
+                saved.groupBy === "integration") {
                 this._groupBy = saved.groupBy;
             }
             if (typeof saved.auditOpen === "boolean")
@@ -3226,6 +3333,12 @@ class HaInsightsPanel extends i {
             }
             if (Array.isArray(saved.filterDetectors)) {
                 this._filterDetectors = saved.filterDetectors.filter((s) => typeof s === "string");
+            }
+            if (Array.isArray(saved.filterFloors)) {
+                this._filterFloors = saved.filterFloors.filter((s) => typeof s === "string");
+            }
+            if (Array.isArray(saved.filterIntegrations)) {
+                this._filterIntegrations = saved.filterIntegrations.filter((s) => typeof s === "string");
             }
         }
         catch {
@@ -3244,6 +3357,8 @@ class HaInsightsPanel extends i {
                 filterAreas: this._filterAreas,
                 filterDeviceClasses: this._filterDeviceClasses,
                 filterDetectors: this._filterDetectors,
+                filterFloors: this._filterFloors,
+                filterIntegrations: this._filterIntegrations,
             }));
         }
         catch {
@@ -3260,7 +3375,8 @@ class HaInsightsPanel extends i {
     get _embeddedCardConfig() {
         const key = `${this._search}|${this._minConfidence}|${this._sortBy}|${this._groupBy}|` +
             `${this._filterDomains.join(",")}|${this._filterAreas.join(",")}|` +
-            `${this._filterDeviceClasses.join(",")}|${this._filterDetectors.join(",")}`;
+            `${this._filterDeviceClasses.join(",")}|${this._filterDetectors.join(",")}|` +
+            `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}`;
         if (this._cachedCardConfigKey !== key) {
             this._cachedCardConfigKey = key;
             this._cachedCardConfig = {
@@ -3279,6 +3395,8 @@ class HaInsightsPanel extends i {
                 area_filter: this._filterAreas,
                 device_class_filter: this._filterDeviceClasses,
                 detector_filter: this._filterDetectors,
+                floor_filter: this._filterFloors,
+                integration_filter: this._filterIntegrations,
             };
         }
         return this._cachedCardConfig;
@@ -3542,6 +3660,7 @@ class HaInsightsPanel extends i {
           <div class="sub">
             Patterns the integration noticed in your home — apply, refine, test, or dismiss each.
           </div>
+          ${this._renderDetectorCounts()}
         </div>
         <div class="actions">
           <button
@@ -3623,6 +3742,8 @@ class HaInsightsPanel extends i {
           <option value="none">Group: None</option>
           <option value="detector">Group: Detector</option>
           <option value="area">Group: Area</option>
+          <option value="floor">Group: Floor</option>
+          <option value="integration">Group: Integration</option>
         </select>
       </div>
       ${this._renderChipFilters()}
@@ -3654,20 +3775,62 @@ class HaInsightsPanel extends i {
         return (this._filterDomains.length > 0 ||
             this._filterAreas.length > 0 ||
             this._filterDeviceClasses.length > 0 ||
-            this._filterDetectors.length > 0);
+            this._filterDetectors.length > 0 ||
+            this._filterFloors.length > 0 ||
+            this._filterIntegrations.length > 0);
     }
     _clearChipFilters() {
         this._filterDomains = [];
         this._filterAreas = [];
         this._filterDeviceClasses = [];
         this._filterDetectors = [];
+        this._filterFloors = [];
+        this._filterIntegrations = [];
     }
-    /** Render a row of multi-select dropdowns for domain/area/device_class/
-     *  detector. Each option list is built from the distinct values in the
-     *  currently-loaded insight set so we never offer a filter that returns
-     *  empty results. */
+    /** A row of small chips listing each detector and its insight count.
+     *  Clicking a chip toggles that detector into / out of the detector
+     *  filter — fastest way to "show me only the cooccurrence ones". The
+     *  active chip is visually emphasized so you can tell what's filtered. */
+    _renderDetectorCounts() {
+        const detectors = Object.keys(this._detectorCounts);
+        if (detectors.length === 0)
+            return "";
+        const active = new Set(this._filterDetectors);
+        // Order by count descending so the noisiest detectors land first.
+        detectors.sort((a, b) => (this._detectorCounts[b] ?? 0) - (this._detectorCounts[a] ?? 0));
+        return b `<div class="detector-counts">
+      ${detectors.map((d) => {
+            const count = this._detectorCounts[d] ?? 0;
+            const isActive = active.has(d);
+            return b `<button
+          class="detector-chip ${isActive ? "is-active" : ""}"
+          title=${isActive
+                ? `Showing only ${d} insights — click to clear`
+                : `Filter to ${d} insights only`}
+          @click=${() => this._toggleDetectorChip(d)}
+        >
+          ${d}<span class="detector-chip-count">${count}</span>
+        </button>`;
+        })}
+    </div>`;
+    }
+    _toggleDetectorChip(detector) {
+        const active = new Set(this._filterDetectors);
+        if (active.has(detector)) {
+            active.delete(detector);
+        }
+        else {
+            active.add(detector);
+        }
+        this._filterDetectors = Array.from(active);
+    }
+    /** Render a row of multi-select dropdowns for each filter axis.
+     *  Each option list is built from the distinct values in the currently-
+     *  loaded insight set so we never offer a filter that returns empty
+     *  results. Area + Floor use registry display names when available so
+     *  the user sees "Kitchen" instead of "kitchen_3a8b…". */
     _renderChipFilters() {
-        const renderSelect = (label, values, selected, onChange) => {
+        const renderSelect = (label, values, selected, onChange, labelFor) => {
             if (values.length === 0)
                 return "";
             return b `<select
@@ -3684,12 +3847,16 @@ class HaInsightsPanel extends i {
         <option value="" ?selected=${selected.length === 0}>
           ${label}: All
         </option>
-        ${values.map((v) => b `<option value=${v} ?selected=${selected.includes(v)}>${v}</option>`)}
+        ${values.map((v) => b `<option value=${v} ?selected=${selected.includes(v)}>
+              ${labelFor ? labelFor(v) : v}
+            </option>`)}
       </select>`;
         };
         return b `<div class="filters" style="padding-top:0;">
       ${renderSelect("Domain", this._availableDomains, this._filterDomains, (n) => (this._filterDomains = n))}
-      ${renderSelect("Area", this._availableAreas, this._filterAreas, (n) => (this._filterAreas = n))}
+      ${renderSelect("Area", this._availableAreas, this._filterAreas, (n) => (this._filterAreas = n), (id) => this._areaNameById[id] ?? id)}
+      ${renderSelect("Floor", this._availableFloors, this._filterFloors, (n) => (this._filterFloors = n), (id) => this._floorNameById[id] ?? id)}
+      ${renderSelect("Integration", this._availableIntegrations, this._filterIntegrations, (n) => (this._filterIntegrations = n))}
       ${renderSelect("Device class", this._availableDeviceClasses, this._filterDeviceClasses, (n) => (this._filterDeviceClasses = n))}
       ${renderSelect("Detector", this._availableDetectors, this._filterDetectors, (n) => (this._filterDetectors = n))}
     </div>`;
@@ -3755,6 +3922,12 @@ __decorate([
 ], HaInsightsPanel.prototype, "_filterDetectors", void 0);
 __decorate([
     r()
+], HaInsightsPanel.prototype, "_filterFloors", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_filterIntegrations", void 0);
+__decorate([
+    r()
 ], HaInsightsPanel.prototype, "_totalInsightCount", void 0);
 __decorate([
     r()
@@ -3771,6 +3944,21 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_availableDetectors", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_availableFloors", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_availableIntegrations", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_areaNameById", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_floorNameById", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_detectorCounts", void 0);
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_toast", void 0);

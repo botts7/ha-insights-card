@@ -29,7 +29,12 @@ export class HaInsightsPanel extends LitElement {
   @state() private _search = "";
   @state() private _minConfidence = 0;
   @state() private _sortBy: "confidence" | "age" | "detector" = "confidence";
-  @state() private _groupBy: "area" | "detector" | "none" = "none";
+  @state() private _groupBy:
+    | "area"
+    | "floor"
+    | "integration"
+    | "detector"
+    | "none" = "none";
   @state() private _backfillBusy = false;
   @state() private _bulkBusy = false;
   @state() private _scanBusy = false;
@@ -39,6 +44,9 @@ export class HaInsightsPanel extends LitElement {
   @state() private _filterAreas: string[] = [];
   @state() private _filterDeviceClasses: string[] = [];
   @state() private _filterDetectors: string[] = [];
+  // v1.2 Phase 5: floor + integration axes alongside domain/area/dc/detector.
+  @state() private _filterFloors: string[] = [];
+  @state() private _filterIntegrations: string[] = [];
   // Total insight count BEFORE chip filters. The card returns the
   // post-filter count via a property; we maintain the pre-filter count
   // here for the "Showing X of Y" hint in the panel header.
@@ -50,6 +58,17 @@ export class HaInsightsPanel extends LitElement {
   @state() private _availableAreas: string[] = [];
   @state() private _availableDeviceClasses: string[] = [];
   @state() private _availableDetectors: string[] = [];
+  // v1.2 Phase 5
+  @state() private _availableFloors: string[] = [];
+  @state() private _availableIntegrations: string[] = [];
+  // Area-id ↔ display-name maps populated from the loaded insight set
+  // so chip dropdowns and the per-detector header show friendly labels
+  // ("Living Room") instead of opaque registry ids.
+  @state() private _areaNameById: Record<string, string> = {};
+  @state() private _floorNameById: Record<string, string> = {};
+  // Per-detector counts displayed as small chips in the header.
+  // Populated from the SAME insight set as the filter chip dropdowns.
+  @state() private _detectorCounts: Record<string, number> = {};
   @state() private _toast = "";
   @state() private _auditOpen = false;
   @state() private _auditLog: AuditLogCall[] = [];
@@ -241,6 +260,43 @@ export class HaInsightsPanel extends LitElement {
       white-space: nowrap;
       font-size: 0.8em;
     }
+    .detector-counts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .detector-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+      color: var(--primary-text-color);
+      font-size: 0.78em;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .detector-chip:hover {
+      background: var(--divider-color, rgba(0, 0, 0, 0.08));
+    }
+    .detector-chip.is-active {
+      background: var(--primary-color);
+      color: var(--text-primary-color, white);
+      border-color: var(--primary-color);
+    }
+    .detector-chip-count {
+      background: rgba(0, 0, 0, 0.12);
+      padding: 0 6px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 0.85em;
+    }
+    .detector-chip.is-active .detector-chip-count {
+      background: rgba(255, 255, 255, 0.25);
+    }
     @media (max-width: 600px) {
       .header,
       .filters,
@@ -295,6 +351,36 @@ export class HaInsightsPanel extends LitElement {
     this._availableDetectors = [
       ...new Set(insights.map((i) => i.detector).filter((v): v is string => !!v)),
     ].sort();
+    this._availableFloors = [
+      ...new Set(insights.map((i) => i.floor_id).filter((v): v is string => !!v)),
+    ].sort();
+    this._availableIntegrations = [
+      ...new Set(
+        insights.map((i) => i.integration).filter((v): v is string => !!v),
+      ),
+    ].sort();
+    // Build id → friendly-name lookups from the loaded list. The card
+    // already carries area_name + floor_name on each row when set;
+    // collecting them here keeps chip labels readable.
+    const areaNames: Record<string, string> = {};
+    const floorNames: Record<string, string> = {};
+    for (const i of insights) {
+      if (typeof i.area_id === "string" && typeof i.area_name === "string") {
+        areaNames[i.area_id] = i.area_name;
+      }
+      if (typeof i.floor_id === "string" && typeof i.floor_name === "string") {
+        floorNames[i.floor_id] = i.floor_name;
+      }
+    }
+    this._areaNameById = areaNames;
+    this._floorNameById = floorNames;
+    // Per-detector counts for the header chip strip.
+    const counts: Record<string, number> = {};
+    for (const i of insights) {
+      const d = i.detector;
+      if (typeof d === "string") counts[d] = (counts[d] ?? 0) + 1;
+    }
+    this._detectorCounts = counts;
     // Compute visible count by re-applying the same filter the card uses
     // (search + min_confidence + chip filters). Cheap; same N as card.
     const search = this._search.trim().toLowerCase();
@@ -302,6 +388,8 @@ export class HaInsightsPanel extends LitElement {
     const area = new Set(this._filterAreas);
     const dc = new Set(this._filterDeviceClasses);
     const det = new Set(this._filterDetectors);
+    const floor = new Set(this._filterFloors);
+    const integ = new Set(this._filterIntegrations);
     this._visibleInsightCount = insights.filter((i) => {
       const conf = (i.confidence as number) ?? 0;
       if (conf < this._minConfidence) return false;
@@ -311,6 +399,13 @@ export class HaInsightsPanel extends LitElement {
       if (area.size > 0 && !(typeof i.area_id === "string" && area.has(i.area_id))) return false;
       if (dc.size > 0 && !(typeof i.device_class === "string" && dc.has(i.device_class))) return false;
       if (det.size > 0 && !(typeof i.detector === "string" && det.has(i.detector))) return false;
+      if (floor.size > 0 && !(typeof i.floor_id === "string" && floor.has(i.floor_id))) return false;
+      if (
+        integ.size > 0 &&
+        !(typeof i.integration === "string" && integ.has(i.integration))
+      ) {
+        return false;
+      }
       return true;
     }).length;
   };
@@ -327,7 +422,13 @@ export class HaInsightsPanel extends LitElement {
       if (saved.sortBy === "confidence" || saved.sortBy === "age" || saved.sortBy === "detector") {
         this._sortBy = saved.sortBy;
       }
-      if (saved.groupBy === "none" || saved.groupBy === "detector" || saved.groupBy === "area") {
+      if (
+        saved.groupBy === "none" ||
+        saved.groupBy === "detector" ||
+        saved.groupBy === "area" ||
+        saved.groupBy === "floor" ||
+        saved.groupBy === "integration"
+      ) {
         this._groupBy = saved.groupBy;
       }
       if (typeof saved.auditOpen === "boolean") this._auditOpen = saved.auditOpen;
@@ -351,6 +452,16 @@ export class HaInsightsPanel extends LitElement {
           (s: unknown): s is string => typeof s === "string",
         );
       }
+      if (Array.isArray(saved.filterFloors)) {
+        this._filterFloors = saved.filterFloors.filter(
+          (s: unknown): s is string => typeof s === "string",
+        );
+      }
+      if (Array.isArray(saved.filterIntegrations)) {
+        this._filterIntegrations = saved.filterIntegrations.filter(
+          (s: unknown): s is string => typeof s === "string",
+        );
+      }
     } catch {
       // Corrupted localStorage entry; fall back to defaults.
     }
@@ -370,6 +481,8 @@ export class HaInsightsPanel extends LitElement {
           filterAreas: this._filterAreas,
           filterDeviceClasses: this._filterDeviceClasses,
           filterDetectors: this._filterDetectors,
+          filterFloors: this._filterFloors,
+          filterIntegrations: this._filterIntegrations,
         }),
       );
     } catch {
@@ -395,7 +508,8 @@ export class HaInsightsPanel extends LitElement {
     const key =
       `${this._search}|${this._minConfidence}|${this._sortBy}|${this._groupBy}|` +
       `${this._filterDomains.join(",")}|${this._filterAreas.join(",")}|` +
-      `${this._filterDeviceClasses.join(",")}|${this._filterDetectors.join(",")}`;
+      `${this._filterDeviceClasses.join(",")}|${this._filterDetectors.join(",")}|` +
+      `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}`;
     if (this._cachedCardConfigKey !== key) {
       this._cachedCardConfigKey = key;
       this._cachedCardConfig = {
@@ -414,6 +528,8 @@ export class HaInsightsPanel extends LitElement {
         area_filter: this._filterAreas,
         device_class_filter: this._filterDeviceClasses,
         detector_filter: this._filterDetectors,
+        floor_filter: this._filterFloors,
+        integration_filter: this._filterIntegrations,
       };
     }
     return this._cachedCardConfig!;
@@ -708,6 +824,7 @@ export class HaInsightsPanel extends LitElement {
           <div class="sub">
             Patterns the integration noticed in your home — apply, refine, test, or dismiss each.
           </div>
+          ${this._renderDetectorCounts()}
         </div>
         <div class="actions">
           <button
@@ -791,6 +908,8 @@ export class HaInsightsPanel extends LitElement {
           <option value="none">Group: None</option>
           <option value="detector">Group: Detector</option>
           <option value="area">Group: Area</option>
+          <option value="floor">Group: Floor</option>
+          <option value="integration">Group: Integration</option>
         </select>
       </div>
       ${this._renderChipFilters()}
@@ -824,7 +943,9 @@ export class HaInsightsPanel extends LitElement {
       this._filterDomains.length > 0 ||
       this._filterAreas.length > 0 ||
       this._filterDeviceClasses.length > 0 ||
-      this._filterDetectors.length > 0
+      this._filterDetectors.length > 0 ||
+      this._filterFloors.length > 0 ||
+      this._filterIntegrations.length > 0
     );
   }
 
@@ -833,18 +954,62 @@ export class HaInsightsPanel extends LitElement {
     this._filterAreas = [];
     this._filterDeviceClasses = [];
     this._filterDetectors = [];
+    this._filterFloors = [];
+    this._filterIntegrations = [];
   }
 
-  /** Render a row of multi-select dropdowns for domain/area/device_class/
-   *  detector. Each option list is built from the distinct values in the
-   *  currently-loaded insight set so we never offer a filter that returns
-   *  empty results. */
+  /** A row of small chips listing each detector and its insight count.
+   *  Clicking a chip toggles that detector into / out of the detector
+   *  filter — fastest way to "show me only the cooccurrence ones". The
+   *  active chip is visually emphasized so you can tell what's filtered. */
+  private _renderDetectorCounts(): TemplateResult | "" {
+    const detectors = Object.keys(this._detectorCounts);
+    if (detectors.length === 0) return "";
+    const active = new Set(this._filterDetectors);
+    // Order by count descending so the noisiest detectors land first.
+    detectors.sort(
+      (a, b) =>
+        (this._detectorCounts[b] ?? 0) - (this._detectorCounts[a] ?? 0),
+    );
+    return html`<div class="detector-counts">
+      ${detectors.map((d) => {
+        const count = this._detectorCounts[d] ?? 0;
+        const isActive = active.has(d);
+        return html`<button
+          class="detector-chip ${isActive ? "is-active" : ""}"
+          title=${isActive
+            ? `Showing only ${d} insights — click to clear`
+            : `Filter to ${d} insights only`}
+          @click=${() => this._toggleDetectorChip(d)}
+        >
+          ${d}<span class="detector-chip-count">${count}</span>
+        </button>`;
+      })}
+    </div>`;
+  }
+
+  private _toggleDetectorChip(detector: string): void {
+    const active = new Set(this._filterDetectors);
+    if (active.has(detector)) {
+      active.delete(detector);
+    } else {
+      active.add(detector);
+    }
+    this._filterDetectors = Array.from(active);
+  }
+
+  /** Render a row of multi-select dropdowns for each filter axis.
+   *  Each option list is built from the distinct values in the currently-
+   *  loaded insight set so we never offer a filter that returns empty
+   *  results. Area + Floor use registry display names when available so
+   *  the user sees "Kitchen" instead of "kitchen_3a8b…". */
   private _renderChipFilters(): TemplateResult {
     const renderSelect = (
       label: string,
       values: string[],
       selected: string[],
       onChange: (next: string[]) => void,
+      labelFor?: (v: string) => string,
     ) => {
       if (values.length === 0) return "";
       return html`<select
@@ -863,7 +1028,9 @@ export class HaInsightsPanel extends LitElement {
         </option>
         ${values.map(
           (v) =>
-            html`<option value=${v} ?selected=${selected.includes(v)}>${v}</option>`,
+            html`<option value=${v} ?selected=${selected.includes(v)}>
+              ${labelFor ? labelFor(v) : v}
+            </option>`,
         )}
       </select>`;
     };
@@ -879,6 +1046,20 @@ export class HaInsightsPanel extends LitElement {
         this._availableAreas,
         this._filterAreas,
         (n) => (this._filterAreas = n),
+        (id) => this._areaNameById[id] ?? id,
+      )}
+      ${renderSelect(
+        "Floor",
+        this._availableFloors,
+        this._filterFloors,
+        (n) => (this._filterFloors = n),
+        (id) => this._floorNameById[id] ?? id,
+      )}
+      ${renderSelect(
+        "Integration",
+        this._availableIntegrations,
+        this._filterIntegrations,
+        (n) => (this._filterIntegrations = n),
       )}
       ${renderSelect(
         "Device class",

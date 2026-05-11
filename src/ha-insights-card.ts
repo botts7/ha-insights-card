@@ -1712,6 +1712,8 @@ export class HaInsightsCard extends LitElement {
     const areaSet = new Set(this._config.area_filter ?? []);
     const dcSet = new Set(this._config.device_class_filter ?? []);
     const detSet = new Set(this._config.detector_filter ?? []);
+    const floorSet = new Set(this._config.floor_filter ?? []);
+    const integSet = new Set(this._config.integration_filter ?? []);
     const filtered = this._insights
       .filter((i) => i.confidence >= min)
       .filter((i) => !search || i.title.toLowerCase().includes(search))
@@ -1726,7 +1728,15 @@ export class HaInsightsCard extends LitElement {
           dcSet.size === 0 ||
           (i.device_class != null && dcSet.has(i.device_class)),
       )
-      .filter((i) => detSet.size === 0 || detSet.has(i.detector));
+      .filter((i) => detSet.size === 0 || detSet.has(i.detector))
+      .filter((i) =>
+        floorSet.size === 0 || (i.floor_id != null && floorSet.has(i.floor_id)),
+      )
+      .filter(
+        (i) =>
+          integSet.size === 0 ||
+          (i.integration != null && integSet.has(i.integration)),
+      );
 
     filtered.sort((a, b) => {
       if (sortBy === "age") {
@@ -1858,12 +1868,22 @@ export class HaInsightsCard extends LitElement {
     if (key === "none") return [["", rows]];
     const buckets = new Map<string, Insight[]>();
     for (const row of rows) {
+      // Prefer the friendly name when one is available — the area_id /
+      // floor_id are opaque GUIDs in the registry, useless as section
+      // headers. integration is already a label-ish string ("hue",
+      // "tuya", "mqtt"). Fall back to "(no area)" / "(no floor)" /
+      // "(no integration)" so a single bucket collects un-tagged rows
+      // and the user can spot what slipped through the registry.
       const groupKey =
         key === "area"
-          ? row.area_id ?? "(no area)"
-          : key === "detector"
-            ? row.detector
-            : "";
+          ? row.area_name ?? row.area_id ?? "(no area)"
+          : key === "floor"
+            ? row.floor_name ?? row.floor_id ?? "(no floor)"
+            : key === "integration"
+              ? row.integration ?? "(no integration)"
+              : key === "detector"
+                ? row.detector
+                : "";
       const existing = buckets.get(groupKey);
       if (existing) existing.push(row);
       else buckets.set(groupKey, [row]);

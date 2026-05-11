@@ -69,6 +69,15 @@ export interface Insight {
   /** v1.1: friendly group label shown when expanding the cohort,
    * e.g. "binary_sensor.home_nvr_*" or "scene.evening_garden". */
   cohort_label?: string | null;
+  /** v1.2 Phase 5: registry-derived axes for filter chips + group_by.
+   * `area_id` overrides the legacy top-level `area_id` (same value;
+   * Insight already carries it from the store). The other four are new.
+   * All five may be null when the insight isn't pinned to a single
+   * entity or the entity has no area / floor / integration. */
+  area_name?: string | null;
+  floor_id?: string | null;
+  floor_name?: string | null;
+  integration?: string | null;
 }
 
 export interface AutomationLink {
@@ -208,8 +217,9 @@ export interface CardConfig {
   compact?: boolean;
   /** v0.7: list sort order. */
   sort_by?: "confidence" | "age" | "detector";
-  /** v0.7: render insights grouped under section headers. */
-  group_by?: "area" | "detector" | "none";
+  /** v0.7: render insights grouped under section headers.
+   *  v1.2 Phase 5 adds floor and integration. */
+  group_by?: "area" | "floor" | "integration" | "detector" | "none";
   /** v0.8: include already-applied insights in the list (so Undo is reachable). */
   include_applied?: boolean;
   /** v1.1: panel-only filter chips. Each is a list of selected values;
@@ -221,6 +231,10 @@ export interface CardConfig {
   area_filter?: string[];
   device_class_filter?: string[];
   detector_filter?: string[];
+  /** v1.2 Phase 5: filter by floor_id and integration platform. Same
+   * shape as the others — empty / undefined means "no filter". */
+  floor_filter?: string[];
+  integration_filter?: string[];
 }
 
 /** Subset of the HA `hass` object the card uses. */
