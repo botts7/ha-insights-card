@@ -236,6 +236,10 @@ export interface CardConfig {
    * shape as the others — empty / undefined means "no filter". */
   floor_filter?: string[];
   integration_filter?: string[];
+  /** v1.2.1: override the integration's audit_analysis_depth setting
+   *  for 🤖 Suggest calls fired from this card. Undefined = inherit
+   *  the OptionsFlow value (defaults to "concise"). */
+  audit_depth?: "concise" | "indepth";
 }
 
 /** Subset of the HA `hass` object the card uses. */

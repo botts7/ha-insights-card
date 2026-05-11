@@ -1380,7 +1380,16 @@ export class HaInsightsCard extends LitElement {
         cached: boolean;
         bytes_sent: number;
         bytes_received: number;
-      }>({ type: "home_insights/audit_suggest", insight_id: insight.id });
+      }>({
+        type: "home_insights/audit_suggest",
+        insight_id: insight.id,
+        // Per-call override of the integration's audit_analysis_depth
+        // OptionsFlow setting. Backend resolves: per-call > options
+        // > "concise" default.
+        ...(this._config.audit_depth
+          ? { analysis_depth: this._config.audit_depth }
+          : {}),
+      });
 
       // Loud-fail guard: if the backend didn't ship original_yaml /
       // refined_yaml (only refined_config), the integration is

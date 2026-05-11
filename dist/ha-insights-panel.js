@@ -1506,7 +1506,16 @@ class HaInsightsCard extends i {
             return;
         this._auditSuggestBusy = insight.id;
         try {
-            const result = await this.hass.connection.sendMessagePromise({ type: "home_insights/audit_suggest", insight_id: insight.id });
+            const result = await this.hass.connection.sendMessagePromise({
+                type: "home_insights/audit_suggest",
+                insight_id: insight.id,
+                // Per-call override of the integration's audit_analysis_depth
+                // OptionsFlow setting. Backend resolves: per-call > options
+                // > "concise" default.
+                ...(this._config.audit_depth
+                    ? { analysis_depth: this._config.audit_depth }
+                    : {}),
+            });
             // Loud-fail guard: if the backend didn't ship original_yaml /
             // refined_yaml (only refined_config), the integration is
             // running stale Python and the modal would open blank. Throw
@@ -3456,6 +3465,11 @@ class HaInsightsPanel extends i {
         // v1.2 Phase 5: floor + integration axes alongside domain/area/dc/detector.
         this._filterFloors = [];
         this._filterIntegrations = [];
+        // v1.2.1: depth of LLM reasoning for 🤖 Suggest. "concise" is the
+        // cheap default (~150 token rules); "indepth" sends a fuller
+        // protocol (~600 token rules) for tricky cases. Persists across
+        // page loads. Passed through the embedded card config.
+        this._auditDepth = "concise";
         // Total insight count BEFORE chip filters. The card returns the
         // post-filter count via a property; we maintain the pre-filter count
         // here for the "Showing X of Y" hint in the panel header.
@@ -3850,6 +3864,9 @@ class HaInsightsPanel extends i {
             if (Array.isArray(saved.filterIntegrations)) {
                 this._filterIntegrations = saved.filterIntegrations.filter((s) => typeof s === "string");
             }
+            if (saved.auditDepth === "concise" || saved.auditDepth === "indepth") {
+                this._auditDepth = saved.auditDepth;
+            }
         }
         catch {
             // Corrupted localStorage entry; fall back to defaults.
@@ -3869,6 +3886,7 @@ class HaInsightsPanel extends i {
                 filterDetectors: this._filterDetectors,
                 filterFloors: this._filterFloors,
                 filterIntegrations: this._filterIntegrations,
+                auditDepth: this._auditDepth,
             }));
         }
         catch {
@@ -3886,7 +3904,8 @@ class HaInsightsPanel extends i {
         const key = `${this._search}|${this._minConfidence}|${this._sortBy}|${this._groupBy}|` +
             `${this._filterDomains.join(",")}|${this._filterAreas.join(",")}|` +
             `${this._filterDeviceClasses.join(",")}|${this._filterDetectors.join(",")}|` +
-            `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}`;
+            `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}|` +
+            `${this._auditDepth}`;
         if (this._cachedCardConfigKey !== key) {
             this._cachedCardConfigKey = key;
             this._cachedCardConfig = {
@@ -3907,6 +3926,7 @@ class HaInsightsPanel extends i {
                 detector_filter: this._filterDetectors,
                 floor_filter: this._filterFloors,
                 integration_filter: this._filterIntegrations,
+                audit_depth: this._auditDepth,
             };
         }
         return this._cachedCardConfig;
@@ -4293,6 +4313,16 @@ class HaInsightsPanel extends i {
           <option value="floor">Group: Floor</option>
           <option value="integration">Group: Integration</option>
         </select>
+        <select
+          aria-label="Audit suggest analysis depth"
+          title="Controls how much reasoning the LLM does on 🤖 Suggest. Concise = ~150 token rules (cheap). In-depth = ~600 token rules with examples (better answers, ~4× input tokens)."
+          .value=${this._auditDepth}
+          @change=${(e) => (this._auditDepth = e.target
+            .value)}
+        >
+          <option value="concise">🤖 Concise (cheap)</option>
+          <option value="indepth">🤖 In-depth (4× tokens)</option>
+        </select>
       </div>
       ${this._renderChipFilters()}
       <div class="filters" style="padding-top:0; padding-bottom:8px;">
@@ -4474,6 +4504,9 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_filterIntegrations", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_auditDepth", void 0);
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_totalInsightCount", void 0);

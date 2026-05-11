@@ -47,6 +47,11 @@ export class HaInsightsPanel extends LitElement {
   // v1.2 Phase 5: floor + integration axes alongside domain/area/dc/detector.
   @state() private _filterFloors: string[] = [];
   @state() private _filterIntegrations: string[] = [];
+  // v1.2.1: depth of LLM reasoning for 🤖 Suggest. "concise" is the
+  // cheap default (~150 token rules); "indepth" sends a fuller
+  // protocol (~600 token rules) for tricky cases. Persists across
+  // page loads. Passed through the embedded card config.
+  @state() private _auditDepth: "concise" | "indepth" = "concise";
   // Total insight count BEFORE chip filters. The card returns the
   // post-filter count via a property; we maintain the pre-filter count
   // here for the "Showing X of Y" hint in the panel header.
@@ -462,6 +467,9 @@ export class HaInsightsPanel extends LitElement {
           (s: unknown): s is string => typeof s === "string",
         );
       }
+      if (saved.auditDepth === "concise" || saved.auditDepth === "indepth") {
+        this._auditDepth = saved.auditDepth;
+      }
     } catch {
       // Corrupted localStorage entry; fall back to defaults.
     }
@@ -483,6 +491,7 @@ export class HaInsightsPanel extends LitElement {
           filterDetectors: this._filterDetectors,
           filterFloors: this._filterFloors,
           filterIntegrations: this._filterIntegrations,
+          auditDepth: this._auditDepth,
         }),
       );
     } catch {
@@ -509,7 +518,8 @@ export class HaInsightsPanel extends LitElement {
       `${this._search}|${this._minConfidence}|${this._sortBy}|${this._groupBy}|` +
       `${this._filterDomains.join(",")}|${this._filterAreas.join(",")}|` +
       `${this._filterDeviceClasses.join(",")}|${this._filterDetectors.join(",")}|` +
-      `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}`;
+      `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}|` +
+      `${this._auditDepth}`;
     if (this._cachedCardConfigKey !== key) {
       this._cachedCardConfigKey = key;
       this._cachedCardConfig = {
@@ -530,6 +540,7 @@ export class HaInsightsPanel extends LitElement {
         detector_filter: this._filterDetectors,
         floor_filter: this._filterFloors,
         integration_filter: this._filterIntegrations,
+        audit_depth: this._auditDepth,
       };
     }
     return this._cachedCardConfig!;
@@ -949,6 +960,17 @@ export class HaInsightsPanel extends LitElement {
           <option value="area">Group: Area</option>
           <option value="floor">Group: Floor</option>
           <option value="integration">Group: Integration</option>
+        </select>
+        <select
+          aria-label="Audit suggest analysis depth"
+          title="Controls how much reasoning the LLM does on 🤖 Suggest. Concise = ~150 token rules (cheap). In-depth = ~600 token rules with examples (better answers, ~4× input tokens)."
+          .value=${this._auditDepth}
+          @change=${(e: Event) =>
+            (this._auditDepth = (e.target as HTMLSelectElement)
+              .value as typeof this._auditDepth)}
+        >
+          <option value="concise">🤖 Concise (cheap)</option>
+          <option value="indepth">🤖 In-depth (4× tokens)</option>
         </select>
       </div>
       ${this._renderChipFilters()}
