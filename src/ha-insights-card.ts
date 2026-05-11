@@ -2521,61 +2521,205 @@ export class HaInsightsCard extends LitElement {
     }
   }
 
-  /** Side-by-side YAML diff. Each line in the original pane gets a
-   *  red tint if it's not present in the refined pane; each refined
-   *  line gets a green tint if it's not in the original. Line-set
-   *  comparison (not LCS) — fast, no moves detected, but the user
-   *  immediately sees what changed without scrolling between two
-   *  separate blocks. */
+  /** IDE-style line diff. Computes a longest-common-subsequence over
+   *  both YAML inputs, then renders an aligned two-column view where:
+   *    - unchanged lines appear on BOTH sides at the same row
+   *    - removed-only lines appear on the left, blank on the right
+   *    - added-only lines appear on the right, blank on the left
+   *
+   *  Each row has a gutter showing line number + change marker
+   *  (-, +, or space). That's the standard pattern in VS Code,
+   *  GitHub PR view, etc. — far more readable for YAML diffs than
+   *  the previous "tint lines not found in the other side" approach
+   *  because rows actually line up across panes. */
   private _renderSideBySideDiff(
     original: string,
     refined: string,
   ): TemplateResult {
-    const origLines = original.split("\n");
-    const refinedLines = refined.split("\n");
-    const origSet = new Set(origLines.map((l) => l.trimEnd()));
-    const refinedSet = new Set(refinedLines.map((l) => l.trimEnd()));
-    const renderLine = (line: string, isInOther: boolean, side: "L" | "R") => {
-      const present = isInOther;
-      const bg = present
-        ? "transparent"
-        : side === "L"
-          ? "rgba(244, 67, 54, 0.12)"
-          : "rgba(76, 175, 80, 0.14)";
-      const sign = present ? " " : side === "L" ? "-" : "+";
-      const color = present
-        ? "var(--primary-text-color)"
-        : side === "L"
-          ? "var(--error-color, #c62828)"
-          : "var(--success-color, #2e7d32)";
-      return html`<div
-        style="background:${bg}; color:${color}; padding:0 6px; white-space:pre; min-height:1.2em;"
-      ><span style="opacity:0.5; user-select:none; display:inline-block; width:1ch;">${sign}</span> ${line || " "}</div>`;
+    const rows = this._alignDiffRows(
+      original.split("\n"),
+      refined.split("\n"),
+    );
+
+    type CellArgs = {
+      lineNum: number | null;
+      text: string | null;
+      marker: " " | "+" | "-";
     };
+    const cell = ({ lineNum, text, marker }: CellArgs, side: "L" | "R") => {
+      const bg =
+        marker === "-"
+          ? "rgba(244, 67, 54, 0.10)"
+          : marker === "+"
+            ? "rgba(76, 175, 80, 0.12)"
+            : "transparent";
+      const color =
+        marker === "-"
+          ? "var(--error-color, #c62828)"
+          : marker === "+"
+            ? "var(--success-color, #2e7d32)"
+            : "var(--primary-text-color)";
+      // Inert empty cell — keeps row alignment when one side has no
+      // content for this row.
+      if (text === null) {
+        return html`<div
+          style="background:${bg}; min-height:1.2em; border-right: 1px solid var(--divider-color, rgba(0,0,0,0.06));"
+        ></div>`;
+      }
+      return html`<div
+        style="background:${bg}; color:${color}; white-space:pre; min-height:1.2em; display:flex; gap:6px; font-family: var(--code-font-family, monospace); border-right: 1px solid var(--divider-color, rgba(0,0,0,0.06)); padding: 0 6px;"
+      ><span
+          style="opacity:0.4; user-select:none; min-width:3ch; text-align:right;"
+        >${lineNum ?? ""}</span><span
+          style="opacity:0.55; user-select:none; width:1ch;"
+        >${marker}</span><span>${text || " "}</span></div>`;
+    };
+
     return html`<div
-      style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;"
+      style="margin-bottom: 8px;"
     >
-      <div>
-        <div style="font-weight:500; margin-bottom:4px;">
+      <div
+        style="display:grid; grid-template-columns: 1fr 1fr; gap: 0; font-weight: 500; font-size:0.88em; margin-bottom: 4px;"
+      >
+        <div style="border-bottom: 2px solid var(--error-color, #c62828); padding-bottom: 2px;">
           Current YAML
         </div>
-        <div
-          style="max-height:380px; overflow:auto; font-family: var(--code-font-family, monospace); font-size:0.82em; background: var(--code-background-color, rgba(0,0,0,0.04)); border-left: 3px solid var(--error-color, #c62828); padding: 8px 0; border-radius: 4px;"
-        >${origLines.map(
-            (line) => renderLine(line, refinedSet.has(line.trimEnd()), "L"),
-          )}</div>
-      </div>
-      <div>
-        <div style="font-weight:500; margin-bottom:4px;">
+        <div style="border-bottom: 2px solid var(--success-color, #4caf50); padding-bottom: 2px; padding-left: 8px;">
           Refined YAML
         </div>
-        <div
-          style="max-height:380px; overflow:auto; font-family: var(--code-font-family, monospace); font-size:0.82em; background: var(--code-background-color, rgba(76, 175, 80, 0.06)); border-left: 3px solid var(--success-color, #4caf50); padding: 8px 0; border-radius: 4px;"
-        >${refinedLines.map(
-            (line) => renderLine(line, origSet.has(line.trimEnd()), "R"),
-          )}</div>
+      </div>
+      <div
+        style="max-height:420px; overflow:auto; font-size:0.82em; background: var(--code-background-color, rgba(0,0,0,0.03)); border-radius: 4px; border: 1px solid var(--divider-color, rgba(0,0,0,0.10));"
+      >
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 0;">
+          ${rows.map(
+            (r) =>
+              html`${cell(
+                {
+                  lineNum: r.leftLineNum,
+                  text: r.leftText,
+                  marker: r.leftMarker,
+                },
+                "L",
+              )}${cell(
+                {
+                  lineNum: r.rightLineNum,
+                  text: r.rightText,
+                  marker: r.rightMarker,
+                },
+                "R",
+              )}`,
+          )}
+        </div>
       </div>
     </div>`;
+  }
+
+  /** Compute aligned diff rows using LCS line matching. Returns an
+   *  array where each row has both a left and right cell — empty
+   *  on one side means the line was inserted/deleted there.
+   *
+   *  Algorithm: standard O(m*n) LCS table over line equality, then
+   *  walk backwards to reconstruct the diff. For automation YAMLs
+   *  (typically 20-200 lines) the dp table is tiny — milliseconds
+   *  even on a Raspberry Pi. */
+  private _alignDiffRows(
+    a: string[],
+    b: string[],
+  ): Array<{
+    leftLineNum: number | null;
+    leftText: string | null;
+    leftMarker: " " | "-";
+    rightLineNum: number | null;
+    rightText: string | null;
+    rightMarker: " " | "+";
+  }> {
+    const m = a.length;
+    const n = b.length;
+    // dp[i][j] = LCS length of a[0..i) vs b[0..j)
+    const dp: number[][] = Array.from({ length: m + 1 }, () =>
+      new Array(n + 1).fill(0),
+    );
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        if (a[i - 1] === b[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1] + 1;
+        } else {
+          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+      }
+    }
+    // Walk back. Collect operations in reverse, then reverse at end.
+    type Op = { type: "="; a: number; b: number } | { type: "-"; a: number } | { type: "+"; b: number };
+    const ops: Op[] = [];
+    let i = m;
+    let j = n;
+    while (i > 0 && j > 0) {
+      if (a[i - 1] === b[j - 1]) {
+        ops.push({ type: "=", a: i - 1, b: j - 1 });
+        i--;
+        j--;
+      } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+        ops.push({ type: "-", a: i - 1 });
+        i--;
+      } else {
+        ops.push({ type: "+", b: j - 1 });
+        j--;
+      }
+    }
+    while (i > 0) {
+      ops.push({ type: "-", a: i - 1 });
+      i--;
+    }
+    while (j > 0) {
+      ops.push({ type: "+", b: j - 1 });
+      j--;
+    }
+    ops.reverse();
+
+    // Convert flat ops into aligned rows. Consecutive `-` and `+`
+    // ops get paired (one on each side); leftover ones get a blank
+    // cell on the opposite side.
+    const rows: ReturnType<typeof this._alignDiffRows> = [];
+    let k = 0;
+    while (k < ops.length) {
+      const op = ops[k];
+      if (op.type === "=") {
+        rows.push({
+          leftLineNum: op.a + 1,
+          leftText: a[op.a],
+          leftMarker: " ",
+          rightLineNum: op.b + 1,
+          rightText: b[op.b],
+          rightMarker: " ",
+        });
+        k++;
+        continue;
+      }
+      // Group a run of - and + ops, then pair them up
+      const minus: number[] = [];
+      const plus: number[] = [];
+      while (k < ops.length && ops[k].type !== "=") {
+        const o = ops[k];
+        if (o.type === "-") minus.push(o.a);
+        else plus.push(o.b);
+        k++;
+      }
+      const max = Math.max(minus.length, plus.length);
+      for (let p = 0; p < max; p++) {
+        const lh = p < minus.length ? minus[p] : null;
+        const rh = p < plus.length ? plus[p] : null;
+        rows.push({
+          leftLineNum: lh !== null ? lh + 1 : null,
+          leftText: lh !== null ? a[lh] : null,
+          leftMarker: lh !== null ? "-" : " ",
+          rightLineNum: rh !== null ? rh + 1 : null,
+          rightText: rh !== null ? b[rh] : null,
+          rightMarker: rh !== null ? "+" : " ",
+        });
+      }
+    }
+    return rows;
   }
 
   private _renderRefineAutomationModal(): TemplateResult | typeof nothing {
