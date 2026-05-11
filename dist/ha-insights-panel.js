@@ -2929,6 +2929,32 @@ class HaInsightsCard extends i {
         }
         return rows;
     }
+    /** Render a token-usage pill row under the rationale.
+     *
+     *  We get byte counts from the backend, not exact token counts —
+     *  the HA Conversation API doesn't surface provider-side token
+     *  metering, so we estimate via the standard ~4 chars/token rule
+     *  used by both OpenAI and Anthropic tokenizer docs. Labelled
+     *  "≈" to flag the approximation.
+     *
+     *  Returns nothing for the cached / deterministic-preview path
+     *  (bytes_sent === 0 means we never made an LLM call).
+     */
+    _renderTokenUsage(bytesSent, bytesReceived) {
+        if (!bytesSent && !bytesReceived)
+            return A;
+        const inTokens = Math.round((bytesSent ?? 0) / 4);
+        const outTokens = Math.round((bytesReceived ?? 0) / 4);
+        if (inTokens === 0 && outTokens === 0)
+            return A;
+        return b `<div
+      style="margin: -6px 0 12px 0; font-size: 0.8em; color: var(--secondary-text-color);"
+      title="Token counts are approximate (estimated from response byte length ÷ 4). HA's Conversation API doesn't expose provider-side token meters; bytes_sent/bytes_received are what we measure."
+    >
+      ≈ ${inTokens.toLocaleString()} in / ${outTokens.toLocaleString()} out tokens
+      (${(bytesSent ?? 0).toLocaleString()}B sent · ${(bytesReceived ?? 0).toLocaleString()}B received)
+    </div>`;
+    }
     _renderRefineAutomationModal() {
         const m = this._refineAutomationModal;
         if (!m)
@@ -3002,6 +3028,7 @@ class HaInsightsCard extends i {
                       style="margin-bottom: 12px; padding: 10px; background: var(--info-background-color, rgba(33, 150, 243, 0.08)); border-left: 3px solid var(--info-color, #2196f3); border-radius: 4px;"
                     ><strong>Why these changes:</strong> ${m.rationale}</div>`
                 : A}
+                ${this._renderTokenUsage(m.bytesSent, m.bytesReceived)}
                 ${m.diffSummary && m.diffSummary.length > 0
                 ? b `<ul
                       style="margin: 0 0 12px 0; padding-left: 20px;"
