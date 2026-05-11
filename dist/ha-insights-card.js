@@ -489,6 +489,50 @@ class HaInsightsCard extends i {
     .pill-action:hover {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.06));
     }
+    /* Multi-link pill expander. <details> handles open/close; we only
+       need to suppress the default disclosure triangle (Firefox) and
+       style the popout list. */
+    .automation-pill-details {
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .automation-pill-details > summary {
+      display: inline-block;
+    }
+    .automation-pill-details > summary::-webkit-details-marker {
+      display: none;
+    }
+    .automation-pill-menu {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 6px;
+      padding: 8px 10px;
+      background: var(--card-background-color, white);
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      min-width: 220px;
+      max-width: 380px;
+    }
+    .automation-pill-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      justify-content: space-between;
+    }
+    .automation-pill-link {
+      color: var(--primary-color);
+      text-decoration: none;
+      font-size: 0.9em;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .automation-pill-link:hover {
+      text-decoration: underline;
+    }
     /* v1.1: cohort expansion — list of merged entity_ids */
     .cohort-members {
       margin-top: 6px;
@@ -2158,46 +2202,84 @@ class HaInsightsCard extends i {
             return "confidence-medium";
         return "confidence-low";
     }
-    /** Render an "🔁 already automated" or "🤖 in N automations" pill
-     *  with a click-to-edit popover. Hovering shows the automation
-     *  alias(es); clicking opens HA's automation editor for the linked
-     *  one (or the first one if multiple). When no id is known (rare —
-     *  some legacy YAML automations don't have one), the pill is plain
-     *  text with the alias(es) in the tooltip — same as before. */
+    /** Render an "🔁 already automated" or "🤖 in N automations" pill.
+     *
+     *  Single match (N=1): plain anchor + inline ✏️. Click = open the
+     *  one matching automation. Fast path; no extra clicks.
+     *
+     *  Multiple matches (N>1): `<details>` expander where the summary IS
+     *  the pill, and each automation appears below as its own clickable
+     *  row with its own ✏️ Refine button. Native `<details>` gives us
+     *  expand/collapse for free — no popover state, no click-outside
+     *  handling. Earlier version silently picked the first link and the
+     *  user couldn't reach the others; this fixes that.
+     *
+     *  No-id legacy YAML: same fallback as before — text only, no URL,
+     *  Refine button hidden. */
     _renderAutomationPill(label, color, leadText, links) {
         const aliases = links.map((l) => l.alias);
-        const tooltip = `${leadText}: ${aliases.join(", ")}\n\nClick to open in the automation editor.`;
-        // First link with a URL becomes the click target. If none has a
-        // URL, fall back to the dashboard so the user can find the
-        // automation by alias.
-        const firstWithUrl = links.find((l) => l.url);
-        // HA's automation editor uses the SINGULAR form for both the
-        // dashboard list and per-id edit pages.
-        const url = firstWithUrl?.url ?? "/config/automation/dashboard";
-        // ✏️ Refine-with-AI button only appears when there's an id we can
-        // round-trip to the WS endpoints. Stops here-be-dragons cases for
-        // legacy YAML automations without ids that we can't load reliably.
-        const refineTarget = firstWithUrl ?? links.find((l) => l.id);
-        return b `<span class="automation-pill-group">
-      <a
+        const tooltip = `${leadText}: ${aliases.join(", ")}`;
+        // Single-link fast path. Keeps the row compact — most insights only
+        // hit one automation, and forcing an extra click feels punitive.
+        if (links.length <= 1) {
+            const only = links[0];
+            const url = only?.url ?? "/config/automation/dashboard";
+            return b `<span class="automation-pill-group">
+        <a
+          class="pill"
+          href=${url}
+          target="_top"
+          style="color: ${color}; text-decoration: none; cursor: pointer;"
+          title="${tooltip} — click to open the automation editor"
+          @click=${(e) => e.stopPropagation()}
+        >${label}</a>
+        ${only?.id
+                ? b `<button
+              class="pill-action"
+              title="Refine this automation with AI"
+              @click=${(e) => {
+                    e.stopPropagation();
+                    this._openRefineAutomationModal(only.id, only.alias);
+                }}
+            >✏️</button>`
+                : A}
+      </span>`;
+        }
+        // Multi-link expander. Native <details> handles the open/close state.
+        return b `<details
+      class="automation-pill-details"
+      @click=${(e) => e.stopPropagation()}
+    >
+      <summary
         class="pill"
-        href=${url}
-        target="_top"
-        style="color: ${color}; text-decoration: none; cursor: pointer;"
-        title=${tooltip}
-        @click=${(e) => e.stopPropagation()}
-      >${label}</a>
-      ${refineTarget?.id
-            ? b `<button
-            class="pill-action"
-            title="Refine this automation with AI"
-            @click=${(e) => {
-                e.stopPropagation();
-                this._openRefineAutomationModal(refineTarget.id, refineTarget.alias);
-            }}
-          >✏️</button>`
-            : A}
-    </span>`;
+        style="color: ${color}; cursor: pointer; list-style: none;"
+        title="${tooltip} — click to expand"
+      >${label} ▾</summary>
+      <div class="automation-pill-menu">
+        ${links.map((link) => {
+            const url = link.url ?? "/config/automation/dashboard";
+            return b `<div class="automation-pill-row">
+            <a
+              class="automation-pill-link"
+              href=${url}
+              target="_top"
+              title="Open '${link.alias}' in the automation editor"
+              @click=${(e) => e.stopPropagation()}
+            >${link.alias}</a>
+            ${link.id
+                ? b `<button
+                  class="pill-action"
+                  title="Refine '${link.alias}' with AI"
+                  @click=${(e) => {
+                    e.stopPropagation();
+                    this._openRefineAutomationModal(link.id, link.alias);
+                }}
+                >✏️</button>`
+                : A}
+          </div>`;
+        })}
+      </div>
+    </details>`;
     }
     /** Open the refine-existing-automation modal. Loads the YAML via
      *  home_insights/get_automation, then shows the editor + feedback
