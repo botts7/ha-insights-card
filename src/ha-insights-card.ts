@@ -1344,6 +1344,8 @@ export class HaInsightsCard extends LitElement {
         automation_id: string;
         alias?: string;
         refined_config: Record<string, unknown>;
+        original_yaml?: string;
+        refined_yaml?: string;
         rationale: string | null;
         diff_summary: string[];
         cached: boolean;
@@ -1352,17 +1354,15 @@ export class HaInsightsCard extends LitElement {
       }>({ type: "home_insights/audit_suggest", insight_id: insight.id });
 
       // Render via the existing refine-existing-automation modal so
-      // we don't ship a second YAML diff UI. The modal expects the
-      // refine-result shape; we feed it the audit_suggest result
-      // which carries the same fields.
-      const original = (insight.payload as Record<string, unknown>) || {};
+      // we don't ship a second YAML diff UI. Backend now serializes
+      // both sides as real YAML so the side-by-side diff is readable.
       this._refineAutomationModal = {
         automationId: result.automation_id,
         alias: result.alias ?? "",
-        originalYaml: this._tryDumpYaml(original),
+        originalYaml: result.original_yaml ?? "",
         feedback: "",
         busy: false,
-        refinedYaml: this._tryDumpYaml(result.refined_config),
+        refinedYaml: result.refined_yaml ?? "",
         refinedConfig: result.refined_config,
         rationale: result.rationale,
         diffSummary: result.diff_summary ?? [],
@@ -1373,17 +1373,6 @@ export class HaInsightsCard extends LitElement {
       this._failModal(`Suggest failed: ${this._asMessage(err)}`);
     } finally {
       this._auditSuggestBusy = null;
-    }
-  }
-
-  /** Best-effort YAML serialisation. Falls back to JSON pretty-print
-   *  when the dynamic yaml import isn't available — the modal handles
-   *  both. */
-  private _tryDumpYaml(obj: unknown): string {
-    try {
-      return JSON.stringify(obj, null, 2);
-    } catch {
-      return String(obj);
     }
   }
 
@@ -2532,6 +2521,63 @@ export class HaInsightsCard extends LitElement {
     }
   }
 
+  /** Side-by-side YAML diff. Each line in the original pane gets a
+   *  red tint if it's not present in the refined pane; each refined
+   *  line gets a green tint if it's not in the original. Line-set
+   *  comparison (not LCS) — fast, no moves detected, but the user
+   *  immediately sees what changed without scrolling between two
+   *  separate blocks. */
+  private _renderSideBySideDiff(
+    original: string,
+    refined: string,
+  ): TemplateResult {
+    const origLines = original.split("\n");
+    const refinedLines = refined.split("\n");
+    const origSet = new Set(origLines.map((l) => l.trimEnd()));
+    const refinedSet = new Set(refinedLines.map((l) => l.trimEnd()));
+    const renderLine = (line: string, isInOther: boolean, side: "L" | "R") => {
+      const present = isInOther;
+      const bg = present
+        ? "transparent"
+        : side === "L"
+          ? "rgba(244, 67, 54, 0.12)"
+          : "rgba(76, 175, 80, 0.14)";
+      const sign = present ? " " : side === "L" ? "-" : "+";
+      const color = present
+        ? "var(--primary-text-color)"
+        : side === "L"
+          ? "var(--error-color, #c62828)"
+          : "var(--success-color, #2e7d32)";
+      return html`<div
+        style="background:${bg}; color:${color}; padding:0 6px; white-space:pre; min-height:1.2em;"
+      ><span style="opacity:0.5; user-select:none; display:inline-block; width:1ch;">${sign}</span> ${line || " "}</div>`;
+    };
+    return html`<div
+      style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;"
+    >
+      <div>
+        <div style="font-weight:500; margin-bottom:4px;">
+          Current YAML
+        </div>
+        <div
+          style="max-height:380px; overflow:auto; font-family: var(--code-font-family, monospace); font-size:0.82em; background: var(--code-background-color, rgba(0,0,0,0.04)); border-left: 3px solid var(--error-color, #c62828); padding: 8px 0; border-radius: 4px;"
+        >${origLines.map(
+            (line) => renderLine(line, refinedSet.has(line.trimEnd()), "L"),
+          )}</div>
+      </div>
+      <div>
+        <div style="font-weight:500; margin-bottom:4px;">
+          Refined YAML
+        </div>
+        <div
+          style="max-height:380px; overflow:auto; font-family: var(--code-font-family, monospace); font-size:0.82em; background: var(--code-background-color, rgba(76, 175, 80, 0.06)); border-left: 3px solid var(--success-color, #4caf50); padding: 8px 0; border-radius: 4px;"
+        >${refinedLines.map(
+            (line) => renderLine(line, origSet.has(line.trimEnd()), "R"),
+          )}</div>
+      </div>
+    </div>`;
+  }
+
   private _renderRefineAutomationModal(): TemplateResult | typeof nothing {
     const m = this._refineAutomationModal;
     if (!m) return nothing;
@@ -2604,12 +2650,10 @@ export class HaInsightsCard extends LitElement {
                       (line) => html`<li>${line}</li>`,
                     )}</ul>`
                   : nothing}
-                <div style="margin-bottom: 8px; font-weight: 500;">
-                  Refined YAML
-                </div>
-                <pre
-                  style="max-height: 320px; overflow: auto; background: var(--code-background-color, rgba(76, 175, 80, 0.08)); padding: 12px; border-radius: 4px; font-size: 0.85em; border-left: 3px solid var(--success-color, #4caf50);"
-                >${m.refinedYaml}</pre>
+                ${this._renderSideBySideDiff(
+                  m.originalYaml ?? "",
+                  m.refinedYaml,
+                )}
               `
             : nothing}
         </div>
