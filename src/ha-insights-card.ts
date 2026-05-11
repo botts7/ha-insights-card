@@ -384,6 +384,34 @@ export class HaInsightsCard extends LitElement {
     .automation-pill-link:hover {
       text-decoration: underline;
     }
+    /* v1.1 audit findings — collapsible per-observation list shown
+       under audit-row titles. Indented + secondary background so it
+       reads as supporting detail, not another row. */
+    .audit-findings {
+      margin: 6px 0 8px 14px;
+      padding: 8px 12px;
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.03));
+      border-left: 3px solid var(--primary-color);
+      border-radius: 0 6px 6px 0;
+      font-size: 0.9em;
+    }
+    .audit-findings ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .audit-findings li {
+      margin: 2px 0;
+    }
+    .audit-findings .audit-fixes {
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
+      color: var(--success-color, #2e7d32);
+    }
+    .audit-findings .audit-fixes strong {
+      display: block;
+      margin-bottom: 2px;
+    }
     /* v1.1: cohort expansion — list of merged entity_ids */
     .cohort-members {
       margin-top: 6px;
@@ -2123,6 +2151,13 @@ export class HaInsightsCard extends LitElement {
     const expanded = this._expandedCohorts.has(insight.id);
     const members = insight.cohort_members ?? [];
     const hasCohort = members.length > 0;
+    // Audit-specific finding list: pulled from payload.observations
+    // (set by the AutomationAuditDetector). Rendered as a collapsible
+    // findings panel beneath the title row so the user sees the
+    // observations at a glance.
+    const auditObservations = this._auditObservationsFor(insight);
+    const auditFixSummaries = this._auditFixSummariesFor(insight);
+    const auditExpanded = this._expandedCohorts.has(`audit:${insight.id}`);
     return html`
       <div class="row" @click=${() => this._openDialog(insight.id)}>
         <div class="row-title">
@@ -2138,7 +2173,42 @@ export class HaInsightsCard extends LitElement {
                 }}
               >${expanded ? "▾ hide" : `▸ show ${members.length}`}</button>`
             : nothing}
+          ${auditObservations.length > 0
+            ? html` <button
+                class="pill-action"
+                style="margin-left:6px;"
+                title="${auditExpanded ? 'Hide' : 'Show'} the ${auditObservations.length} audit finding${auditObservations.length === 1 ? '' : 's'}"
+                @click=${(e: Event) => {
+                  e.stopPropagation();
+                  this._toggleCohortExpansion(`audit:${insight.id}`);
+                }}
+              >${auditExpanded
+                ? '▾ hide findings'
+                : `▸ ${auditObservations.length} finding${auditObservations.length === 1 ? '' : 's'}`}</button>`
+            : nothing}
         </div>
+        ${auditObservations.length > 0 && auditExpanded
+          ? html`<div
+              class="audit-findings"
+              @click=${(e: Event) => e.stopPropagation()}
+            >
+              <ul>
+                ${auditObservations.map(
+                  (o) => html`<li title="${o.kind}">${o.text}</li>`,
+                )}
+              </ul>
+              ${auditFixSummaries.length > 0
+                ? html`<div class="audit-fixes">
+                    <strong>🔧 Auto-fix preview:</strong>
+                    <ul>
+                      ${auditFixSummaries.map(
+                        (s) => html`<li>${s}</li>`,
+                      )}
+                    </ul>
+                  </div>`
+                : nothing}
+            </div>`
+          : nothing}
         ${hasCohort && expanded
           ? html`<div
               class="cohort-members"
@@ -2213,6 +2283,41 @@ export class HaInsightsCard extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  /** Pull the observations array off an audit insight's payload.
+   *  Returns [] for non-audit insights. Tolerates payloads where
+   *  `observations` is missing or malformed. */
+  private _auditObservationsFor(
+    insight: Insight,
+  ): Array<{ kind: string; text: string }> {
+    if (insight.detector !== "automation_audit") return [];
+    const payload = insight.payload as Record<string, unknown> | undefined;
+    if (!payload) return [];
+    // Deterministic-fix audits stash observations under _audit.observations.
+    const auditMeta = (payload._audit as Record<string, unknown> | undefined);
+    const raw = (auditMeta?.observations as unknown) ?? payload.observations;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((o): o is Record<string, unknown> => typeof o === "object" && o !== null)
+      .map((o) => ({
+        kind: typeof o.kind === "string" ? o.kind : "",
+        text: typeof o.text === "string" ? o.text : "",
+      }))
+      .filter((o) => o.text.length > 0);
+  }
+
+  /** For deterministic-fix audit insights (payload_format = automation
+   *  with _audit metadata), surface the human-readable summaries of
+   *  what was changed. Empty list for the LLM-suggest path or reports. */
+  private _auditFixSummariesFor(insight: Insight): string[] {
+    if (insight.detector !== "automation_audit") return [];
+    const payload = insight.payload as Record<string, unknown> | undefined;
+    if (!payload) return [];
+    const auditMeta = (payload._audit as Record<string, unknown> | undefined);
+    const raw = auditMeta?.fix_summaries;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((s): s is string => typeof s === "string");
   }
 
   private _confidenceClass(confidence: number): string {
