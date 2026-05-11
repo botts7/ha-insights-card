@@ -1370,9 +1370,48 @@ export class HaInsightsCard extends LitElement {
         bytesReceived: result.bytes_received,
       };
     } catch (err) {
-      this._failModal(`Suggest failed: ${this._asMessage(err)}`);
+      const message = this._asMessage(err);
+      // Two-channel visibility: card error banner AND an HA persistent
+      // notification. A silent button reset is what landed the user
+      // here previously — never again. Notification stays until the
+      // user dismisses it; banner is per-card-render.
+      this._failModal(`Suggest failed: ${message}`);
+      void this._postPersistentNotification(
+        "HA Insights: 🤖 Suggest failed",
+        `Could not suggest improvements for "${insight.title}": ${message}\n\n`
+          + "If this is the AttemptAudit/to_dict error, reload the integration "
+          + "(Settings → Devices & Services → HA Insights → ⋮ → Reload) — "
+          + "Python caches the old code until reload.",
+        `ha_insights_suggest_fail_${insight.id}`,
+      );
     } finally {
       this._auditSuggestBusy = null;
+    }
+  }
+
+  /** Fire HA's persistent_notification.create so a failure isn't
+   *  hidden in the card's banner if the user scrolled away.
+   *  Notification appears under the bell icon in the top bar AND
+   *  in Settings → Notifications. */
+  private async _postPersistentNotification(
+    title: string,
+    message: string,
+    notificationId: string,
+  ): Promise<void> {
+    if (!this.hass) return;
+    try {
+      await this.hass.connection.sendMessagePromise({
+        type: "call_service",
+        domain: "persistent_notification",
+        service: "create",
+        service_data: {
+          title,
+          message,
+          notification_id: notificationId,
+        },
+      });
+    } catch {
+      // Notification fallback is best-effort; banner already has it.
     }
   }
 
