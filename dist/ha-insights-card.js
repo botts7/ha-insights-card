@@ -1849,7 +1849,109 @@ class HaInsightsCard extends i {
             // Default: confidence (high first)
             return b.confidence - a.confidence;
         });
-        return filtered.slice(0, cap);
+        // Client-side dedup pass. Works on whatever the server sent —
+        // useful when the server hasn't been reloaded since the dedup
+        // helper shipped, or when the store has insights from an older
+        // fingerprint schema. Pure presentation transform; no WS calls.
+        const deduped = this._clientSideDedup(filtered);
+        return deduped.slice(0, cap);
+    }
+    /** Group insights by (detector, normalized title). Rows that share a
+     *  normalized title AND a common domain get merged: highest-confidence
+     *  one becomes the representative, others collapse into cohort_members.
+     *  Idempotent — if the server already merged them (cohort_label set on
+     *  every row of the bucket), pass through unchanged. */
+    _clientSideDedup(rows) {
+        if (rows.length < 2)
+            return rows;
+        const buckets = new Map();
+        for (const r of rows) {
+            // Strip entity_id-shaped tokens from the title to find similar rows.
+            const norm = (r.title || "").replace(/\b[a-z_]+\.[A-Za-z0-9_]+\b/g, "<E>");
+            const key = `${r.detector}|${r.kind}|${norm}`;
+            const arr = buckets.get(key);
+            if (arr)
+                arr.push(r);
+            else
+                buckets.set(key, [r]);
+        }
+        const out = [];
+        for (const bucket of buckets.values()) {
+            if (bucket.length < 2) {
+                out.push(bucket[0]);
+                continue;
+            }
+            // Collect all entity_ids referenced by the bucket.
+            const allEids = new Set();
+            for (const ins of bucket) {
+                const fp = ins.fingerprint;
+                if (fp) {
+                    for (const k of [
+                        "entity_id",
+                        "leader_entity_id",
+                        "follower_entity_id",
+                        "target_entity_id",
+                    ]) {
+                        const v = fp[k];
+                        if (typeof v === "string" && v.includes("."))
+                            allEids.add(v);
+                    }
+                }
+                // Also pick up cohort_members from server-side merges so a
+                // partially-merged bucket folds together cleanly.
+                for (const m of ins.cohort_members ?? []) {
+                    if (typeof m === "string" && m.includes("."))
+                        allEids.add(m);
+                }
+            }
+            const eidList = Array.from(allEids).sort();
+            if (eidList.length < 2) {
+                out.push(...bucket);
+                continue;
+            }
+            const domains = new Set(eidList.map((e) => e.split(".", 1)[0]).filter(Boolean));
+            let label;
+            if (domains.size === 1) {
+                const prefix = this._longestCommonPrefix(eidList);
+                label = prefix ?? `${[...domains][0]}.* (cohort)`;
+            }
+            else {
+                // Mixed domains — unusual but possible. Keep separate.
+                out.push(...bucket);
+                continue;
+            }
+            const rep = bucket.reduce((best, x) => (x.confidence ?? 0) > (best.confidence ?? 0) ? x : best);
+            const others = bucket.length - 1;
+            // Idempotent: if the server already added the suffix, don't double.
+            const baseTitle = (rep.title || "").replace(/ \(\+\d+ similar entities[^)]*\)$/, "");
+            const merged = {
+                ...rep,
+                title: `${baseTitle} (+${others} similar entities: ${label})`,
+                cohort_members: eidList,
+                cohort_label: label,
+            };
+            out.push(merged);
+        }
+        // Preserve sort order: re-sort by the original sortBy criterion.
+        out.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+        return out;
+    }
+    _longestCommonPrefix(eids) {
+        if (eids.length < 2)
+            return null;
+        const domain = eids[0].split(".", 1)[0];
+        const names = eids.map((e) => e.split(".", 2)[1] ?? "");
+        let prefix = names[0];
+        for (const n of names.slice(1)) {
+            while (prefix && !n.startsWith(prefix))
+                prefix = prefix.slice(0, -1);
+            if (!prefix)
+                return null;
+        }
+        prefix = prefix.replace(/_+$/, "");
+        if (prefix.length < 4)
+            return null;
+        return `${domain}.${prefix}_*`;
     }
     /** Bucket insights by the configured group_by key. Returns ordered
      *  pairs so the render can produce stable section ordering. */
