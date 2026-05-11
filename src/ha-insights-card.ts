@@ -500,6 +500,35 @@ export class HaInsightsCard extends LitElement {
       overflow: hidden;
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     }
+    /* Wide variant for the diff modal — YAML needs horizontal room */
+    .dialog.dialog-wide {
+      max-width: min(1400px, 96vw);
+    }
+    /* Phone-size — modal eats the screen, and the diff panes stack
+       vertically instead of splitting side-by-side */
+    @media (max-width: 720px) {
+      .dialog-backdrop {
+        padding: 0;
+      }
+      .dialog,
+      .dialog.dialog-wide {
+        width: 100vw;
+        max-width: 100vw;
+        height: 100vh;
+        max-height: 100vh;
+        border-radius: 0;
+      }
+      .diff-grid {
+        grid-template-columns: 1fr !important;
+      }
+      .diff-grid > .diff-pane {
+        max-height: 45vh;
+      }
+      .diff-header {
+        grid-template-columns: 1fr !important;
+        gap: 4px !important;
+      }
+    }
     .dialog-header {
       padding: 16px 20px;
       border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
@@ -2630,6 +2659,7 @@ export class HaInsightsCard extends LitElement {
       style="margin-bottom: 8px;"
     >
       <div
+        class="diff-header"
         style="display:grid; grid-template-columns: 1fr 1fr; gap: 0; font-weight: 500; font-size:0.88em; margin-bottom: 4px;"
       >
         <div style="border-bottom: 2px solid var(--error-color, #c62828); padding-bottom: 2px;">
@@ -2640,9 +2670,10 @@ export class HaInsightsCard extends LitElement {
         </div>
       </div>
       <div
-        style="max-height:420px; overflow:auto; font-size:0.82em; background: var(--code-background-color, rgba(0,0,0,0.03)); border-radius: 4px; border: 1px solid var(--divider-color, rgba(0,0,0,0.10));"
+        class="diff-pane"
+        style="max-height:55vh; overflow:auto; font-size:0.82em; background: var(--code-background-color, rgba(0,0,0,0.03)); border-radius: 4px; border: 1px solid var(--divider-color, rgba(0,0,0,0.10));"
       >
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 0;">
+        <div class="diff-grid" style="display:grid; grid-template-columns: 1fr 1fr; gap: 0;">
           ${rows.map(
             (r) =>
               html`${cell(
@@ -2781,9 +2812,8 @@ export class HaInsightsCard extends LitElement {
       @click=${this._closeRefineAutomationModal}
     >
       <div
-        class="dialog"
+        class="dialog dialog-wide"
         @click=${(e: Event) => e.stopPropagation()}
-        style="max-width: 900px;"
       >
         <div class="dialog-header">
           <div class="dialog-title">✏️ Refine '${m.alias}' with AI</div>
