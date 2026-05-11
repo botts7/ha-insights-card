@@ -2147,7 +2147,9 @@ class HaInsightsCard extends i {
         // URL, fall back to the dashboard so the user can find the
         // automation by alias.
         const firstWithUrl = links.find((l) => l.url);
-        const url = firstWithUrl?.url ?? "/config/automations/dashboard";
+        // HA's automation editor uses the SINGULAR form for both the
+        // dashboard list and per-id edit pages.
+        const url = firstWithUrl?.url ?? "/config/automation/dashboard";
         // ✏️ Refine-with-AI button only appears when there's an id we can
         // round-trip to the WS endpoints. Stops here-be-dragons cases for
         // legacy YAML automations without ids that we can't load reliably.
