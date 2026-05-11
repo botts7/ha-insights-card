@@ -2777,6 +2777,8 @@ export class HaInsightsCard extends LitElement {
   private _renderSideBySideDiff(
     original: string,
     refined: string,
+    leftLabel: string = "Current YAML",
+    rightLabel: string = "Refined YAML",
   ): TemplateResult {
     const rows = this._alignDiffRows(
       original.split("\n"),
@@ -2825,10 +2827,10 @@ export class HaInsightsCard extends LitElement {
         style="display:grid; grid-template-columns: 1fr 1fr; gap: 0; font-weight: 500; font-size:0.88em; margin-bottom: 4px;"
       >
         <div style="border-bottom: 2px solid var(--error-color, #c62828); padding-bottom: 2px;">
-          Current YAML
+          ${leftLabel}
         </div>
         <div style="border-bottom: 2px solid var(--success-color, #4caf50); padding-bottom: 2px; padding-left: 8px;">
-          Refined YAML
+          ${rightLabel}
         </div>
       </div>
       <div
@@ -3006,7 +3008,13 @@ export class HaInsightsCard extends LitElement {
         @click=${(e: Event) => e.stopPropagation()}
       >
         <div class="dialog-header">
-          <div class="dialog-title">✏️ Refine '${m.alias}' with AI</div>
+          <div class="dialog-title">
+            ${m.refinedSource === "deterministic"
+              ? html`📋 Preview deterministic fix for '${m.alias}'`
+              : m.refinedSource === "stage-two"
+                ? html`📋 + 🤖 Algorithm + LLM refine of '${m.alias}'`
+                : html`✏️ Refine '${m.alias}' with AI`}
+          </div>
           <button
             class="dialog-close"
             aria-label="Close"
@@ -3077,6 +3085,16 @@ export class HaInsightsCard extends LitElement {
                 ${this._renderSideBySideDiff(
                   m.originalYaml ?? "",
                   m.refinedYaml,
+                  m.refinedSource === "stage-two"
+                    ? "Algorithm Output (stage 1)"
+                    : m.refinedSource === "deterministic"
+                      ? "Current YAML (live)"
+                      : "Current YAML",
+                  m.refinedSource === "deterministic"
+                    ? "Algorithm Fix (no LLM)"
+                    : m.refinedSource === "stage-two"
+                      ? "LLM Refinement (stage 2)"
+                      : "Refined by LLM",
                 )}
               `
             : nothing}
@@ -3144,12 +3162,23 @@ export class HaInsightsCard extends LitElement {
                     }
                   }}
                   ?disabled=${m.busy}
-                >Discard refinement</button>
+                >Discard</button>
                 <button
                   class="primary"
                   @click=${this._applyRefineAutomation}
                   ?disabled=${m.busy}
-                >${m.busy ? "Applying…" : "Apply refinement"}</button>
+                  title=${m.refinedSource === "deterministic"
+                    ? "Write the algorithm's deterministic fix to automations.yaml"
+                    : m.refinedSource === "stage-two"
+                      ? "Write the LLM's stage-2 refinement to automations.yaml"
+                      : "Write this refined YAML to automations.yaml"}
+                >${m.busy
+                  ? "Applying…"
+                  : m.refinedSource === "deterministic"
+                    ? "Apply algorithm fix"
+                    : m.refinedSource === "stage-two"
+                      ? "Apply stage-2 result"
+                      : "Apply refinement"}</button>
               `}
         </div>
       </div>

@@ -2773,7 +2773,7 @@ class HaInsightsCard extends i {
      *  GitHub PR view, etc. — far more readable for YAML diffs than
      *  the previous "tint lines not found in the other side" approach
      *  because rows actually line up across panes. */
-    _renderSideBySideDiff(original, refined) {
+    _renderSideBySideDiff(original, refined, leftLabel = "Current YAML", rightLabel = "Refined YAML") {
         const rows = this._alignDiffRows(original.split("\n"), refined.split("\n"));
         const cell = ({ lineNum, text, marker }, side) => {
             const bg = marker === "-"
@@ -2809,10 +2809,10 @@ class HaInsightsCard extends i {
         style="display:grid; grid-template-columns: 1fr 1fr; gap: 0; font-weight: 500; font-size:0.88em; margin-bottom: 4px;"
       >
         <div style="border-bottom: 2px solid var(--error-color, #c62828); padding-bottom: 2px;">
-          Current YAML
+          ${leftLabel}
         </div>
         <div style="border-bottom: 2px solid var(--success-color, #4caf50); padding-bottom: 2px; padding-left: 8px;">
-          Refined YAML
+          ${rightLabel}
         </div>
       </div>
       <div
@@ -2968,7 +2968,13 @@ class HaInsightsCard extends i {
         @click=${(e) => e.stopPropagation()}
       >
         <div class="dialog-header">
-          <div class="dialog-title">✏️ Refine '${m.alias}' with AI</div>
+          <div class="dialog-title">
+            ${m.refinedSource === "deterministic"
+            ? b `📋 Preview deterministic fix for '${m.alias}'`
+            : m.refinedSource === "stage-two"
+                ? b `📋 + 🤖 Algorithm + LLM refine of '${m.alias}'`
+                : b `✏️ Refine '${m.alias}' with AI`}
+          </div>
           <button
             class="dialog-close"
             aria-label="Close"
@@ -3034,7 +3040,15 @@ class HaInsightsCard extends i {
                       style="margin: 0 0 12px 0; padding-left: 20px;"
                     >${m.diffSummary.map((line) => b `<li>${line}</li>`)}</ul>`
                 : A}
-                ${this._renderSideBySideDiff(m.originalYaml ?? "", m.refinedYaml)}
+                ${this._renderSideBySideDiff(m.originalYaml ?? "", m.refinedYaml, m.refinedSource === "stage-two"
+                ? "Algorithm Output (stage 1)"
+                : m.refinedSource === "deterministic"
+                    ? "Current YAML (live)"
+                    : "Current YAML", m.refinedSource === "deterministic"
+                ? "Algorithm Fix (no LLM)"
+                : m.refinedSource === "stage-two"
+                    ? "LLM Refinement (stage 2)"
+                    : "Refined by LLM")}
               `
             : A}
         </div>
@@ -3101,12 +3115,23 @@ class HaInsightsCard extends i {
                 }
             }}
                   ?disabled=${m.busy}
-                >Discard refinement</button>
+                >Discard</button>
                 <button
                   class="primary"
                   @click=${this._applyRefineAutomation}
                   ?disabled=${m.busy}
-                >${m.busy ? "Applying…" : "Apply refinement"}</button>
+                  title=${m.refinedSource === "deterministic"
+                ? "Write the algorithm's deterministic fix to automations.yaml"
+                : m.refinedSource === "stage-two"
+                    ? "Write the LLM's stage-2 refinement to automations.yaml"
+                    : "Write this refined YAML to automations.yaml"}
+                >${m.busy
+                ? "Applying…"
+                : m.refinedSource === "deterministic"
+                    ? "Apply algorithm fix"
+                    : m.refinedSource === "stage-two"
+                        ? "Apply stage-2 result"
+                        : "Apply refinement"}</button>
               `}
         </div>
       </div>
