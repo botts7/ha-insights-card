@@ -16,7 +16,8 @@ export type PayloadFormat =
   | "automation"
   | "card"
   | "group"
-  | "scene";
+  | "scene"
+  | "report";
 
 export interface Insight {
   id: string;

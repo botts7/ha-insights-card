@@ -220,6 +220,10 @@ class HaInsightsCard extends i {
         this._insights = [];
         this._loading = true;
         this._explainBusy = false;
+        // Per-insight busy flag for the audit_suggest LLM call. Distinct
+        // from Refine so an in-flight suggest on one row doesn't disable
+        // refine on another.
+        this._auditSuggestBusy = null;
         this._ttsBusy = false;
         this._refineBusy = false;
         /** v0.9 phase 6: ephemeral hypothesis text per anomaly id. Not persisted. */
@@ -1435,6 +1439,54 @@ class HaInsightsCard extends i {
             this._busyId = undefined;
         }
     }
+    /** Ask the LLM for concrete YAML edits on an audit insight whose
+     *  findings don't have a deterministic fix. Reuses the
+     *  refine-existing-automation modal to render the result. Cached
+     *  on the backend by (yaml_hash + observation_kinds_hash) so a
+     *  repeated click on the same row costs zero tokens. */
+    async _runAuditSuggest(insight) {
+        if (!this.hass)
+            return;
+        this._auditSuggestBusy = insight.id;
+        try {
+            const result = await this.hass.connection.sendMessagePromise({ type: "home_insights/audit_suggest", insight_id: insight.id });
+            // Render via the existing refine-existing-automation modal so
+            // we don't ship a second YAML diff UI. The modal expects the
+            // refine-result shape; we feed it the audit_suggest result
+            // which carries the same fields.
+            const original = insight.payload || {};
+            this._refineAutomationModal = {
+                automationId: result.automation_id,
+                alias: result.alias ?? "",
+                originalYaml: this._tryDumpYaml(original),
+                feedback: "",
+                busy: false,
+                refinedYaml: this._tryDumpYaml(result.refined_config),
+                refinedConfig: result.refined_config,
+                rationale: result.rationale,
+                diffSummary: result.diff_summary ?? [],
+                bytesSent: result.bytes_sent,
+                bytesReceived: result.bytes_received,
+            };
+        }
+        catch (err) {
+            this._failModal(`Suggest failed: ${this._asMessage(err)}`);
+        }
+        finally {
+            this._auditSuggestBusy = null;
+        }
+    }
+    /** Best-effort YAML serialisation. Falls back to JSON pretty-print
+     *  when the dynamic yaml import isn't available — the modal handles
+     *  both. */
+    _tryDumpYaml(obj) {
+        try {
+            return JSON.stringify(obj, null, 2);
+        }
+        catch {
+            return String(obj);
+        }
+    }
     async _explain(insight) {
         if (!this.hass)
             return;
@@ -2211,6 +2263,17 @@ class HaInsightsCard extends i {
           ${insight.explanation
             ? b `<span class="pill" title="LLM explanation available">💬 explained</span>`
             : A}
+          ${insight.detector === "automation_audit" && insight.payload_format === "report"
+            ? b `<button
+                class="pill-action"
+                ?disabled=${this._auditSuggestBusy === insight.id}
+                title="Ask the LLM for concrete YAML edits based on the audit findings"
+                @click=${(e) => {
+                e.stopPropagation();
+                void this._runAuditSuggest(insight);
+            }}
+              >${this._auditSuggestBusy === insight.id ? "Thinking…" : "🤖 Suggest"}</button>`
+            : A}
         </div>
       </div>
     `;
@@ -2959,6 +3022,9 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_explainBusy", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_auditSuggestBusy", void 0);
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_ttsBusy", void 0);
