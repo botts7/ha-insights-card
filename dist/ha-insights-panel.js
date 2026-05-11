@@ -1496,6 +1496,118 @@ class HaInsightsCard extends i {
             this._busyId = undefined;
         }
     }
+    /** Preview the deterministic-fix audit (Phase B.5) as a side-by-
+     *  side diff. NO LLM call — the refined YAML is already in the
+     *  insight payload from when the detector ran. We just need to
+     *  pull the current YAML so the diff has both sides.
+     *
+     *  Cost: one cheap WS call to home_insights/get_automation,
+     *  zero LLM tokens. Lets users see "here's what would change if
+     *  I click Apply" without committing. */
+    async _previewDeterministicAudit(insight) {
+        if (!this.hass)
+            return;
+        const payload = insight.payload || {};
+        const auditMeta = payload._audit || {};
+        const automationId = auditMeta.automation_id ||
+            payload.id ||
+            "";
+        const alias = auditMeta.automation_alias ||
+            payload.alias ||
+            automationId;
+        const fixSummaries = Array.isArray(auditMeta.fix_summaries)
+            ? auditMeta.fix_summaries
+            : [];
+        // The refined automation lives at the top level of the payload
+        // (Phase B.5 spreads it). Strip the `_audit` metadata so we
+        // diff just the YAML the user would actually apply.
+        const refinedConfig = {};
+        for (const [k, v] of Object.entries(payload)) {
+            if (k === "_audit")
+                continue;
+            refinedConfig[k] = v;
+        }
+        // Prefer the backend's pre-serialized YAML (now stored on the
+        // insight payload as _audit.refined_yaml_text). Falls back to a
+        // client-side JSON dump for backwards compatibility with older
+        // stored audit insights.
+        const backendRefinedYaml = typeof auditMeta.refined_yaml_text === "string"
+            ? auditMeta.refined_yaml_text
+            : "";
+        try {
+            const result = await this.hass.connection.sendMessagePromise({
+                type: "home_insights/get_automation",
+                automation_id: automationId,
+            });
+            const refinedYaml = backendRefinedYaml || JSON.stringify(refinedConfig, null, 2);
+            this._refineAutomationModal = {
+                automationId,
+                alias,
+                originalYaml: result.yaml,
+                feedback: "",
+                busy: false,
+                refinedYaml,
+                refinedConfig,
+                rationale: "Deterministic fix — no LLM was called. " +
+                    (fixSummaries.length > 0
+                        ? fixSummaries.join(" ")
+                        : "Review the diff below; Apply writes the refined YAML to your automation."),
+                diffSummary: fixSummaries,
+                refinedSource: "deterministic",
+                auditInsightId: insight.id,
+            };
+        }
+        catch (err) {
+            this._failModal(`Preview failed: ${this._asMessage(err)}`);
+        }
+    }
+    /** Two-stage refinement: take the current modal's refined YAML
+     *  (from a 📋 Preview) as the new starting point, then ask the
+     *  LLM to refine further with any additional user feedback typed
+     *  in the textarea. The deterministic fixes are preserved as the
+     *  baseline — the LLM builds on top instead of redoing them. */
+    async _refineFurtherWithLlm() {
+        const m = this._refineAutomationModal;
+        if (!this.hass || !m || !m.auditInsightId || !m.refinedConfig)
+            return;
+        this._refineAutomationModal = { ...m, busy: true, error: undefined };
+        try {
+            const result = await this.hass.connection.sendMessagePromise({
+                type: "home_insights/audit_suggest",
+                insight_id: m.auditInsightId,
+                seed_config: m.refinedConfig,
+                extra_feedback: m.feedback || "",
+                ...(this._config.audit_depth
+                    ? { analysis_depth: this._config.audit_depth }
+                    : {}),
+            });
+            if (!result.refined_yaml) {
+                throw new Error("LLM response missing refined_yaml. The integration may "
+                    + "need a reload to pick up the two-stage refinement code.");
+            }
+            this._refineAutomationModal = {
+                ...m,
+                // Baseline is now the algorithm's output (what the LLM was
+                // given). Refined is the LLM's further refinement.
+                originalYaml: result.original_yaml ?? m.refinedYaml ?? "",
+                refinedYaml: result.refined_yaml,
+                refinedConfig: result.refined_config,
+                rationale: result.rationale,
+                diffSummary: result.diff_summary ?? [],
+                bytesSent: result.bytes_sent,
+                bytesReceived: result.bytes_received,
+                busy: false,
+                refinedSource: "stage-two",
+            };
+        }
+        catch (err) {
+            this._refineAutomationModal = {
+                ...this._refineAutomationModal,
+                busy: false,
+                error: this._asMessage(err),
+            };
+        }
+    }
     /** Ask the LLM for concrete YAML edits on an audit insight whose
      *  findings don't have a deterministic fix. Reuses the
      *  refine-existing-automation modal to render the result. Cached
@@ -2407,6 +2519,16 @@ class HaInsightsCard extends i {
             }}
               >${this._auditSuggestBusy === insight.id ? "Thinking…" : "🤖 Suggest"}</button>`
             : A}
+          ${insight.detector === "automation_audit" && insight.payload_format === "automation"
+            ? b `<button
+                class="pill-action"
+                title="Preview the deterministic fix as a side-by-side diff (no LLM cost)"
+                @click=${(e) => {
+                e.stopPropagation();
+                void this._previewDeterministicAudit(insight);
+            }}
+              >📋 Preview</button>`
+            : A}
         </div>
       </div>
     `;
@@ -2889,6 +3011,49 @@ class HaInsightsCard extends i {
               `
             : A}
         </div>
+        ${m.refinedYaml && m.auditInsightId
+            ? b `<div
+              style="border-top: 1px solid var(--divider-color, rgba(0,0,0,0.1)); padding: 10px 16px; background: var(--secondary-background-color, rgba(0,0,0,0.02));"
+              @click=${(e) => e.stopPropagation()}
+            >
+              <div style="font-size: 0.85em; font-weight: 500; margin-bottom: 4px;">
+                ${m.refinedSource === "deterministic"
+                ? "🤖 Take this further with the LLM?"
+                : "🤖 Refine again with more guidance?"}
+              </div>
+              <textarea
+                rows="2"
+                style="width: 100%; padding: 6px 8px; box-sizing: border-box; font-family: inherit; font-size: 0.88em;"
+                placeholder=${m.refinedSource === "deterministic"
+                ? "Optional — describe any extra changes (e.g. 'also disable on holidays', 'add a notification')"
+                : "Optional follow-up feedback for another LLM pass…"}
+                .value=${m.feedback}
+                @input=${(e) => {
+                if (this._refineAutomationModal) {
+                    this._refineAutomationModal = {
+                        ...this._refineAutomationModal,
+                        feedback: e.target.value,
+                    };
+                }
+            }}
+                ?disabled=${m.busy}
+              ></textarea>
+              <div style="display: flex; justify-content: flex-end; margin-top: 6px;">
+                <button
+                  class="pill-action"
+                  ?disabled=${m.busy}
+                  @click=${this._refineFurtherWithLlm}
+                  title="${m.refinedSource === 'deterministic'
+                ? 'Send the algorithm result + your extra feedback to the LLM for further refinement (uses tokens).'
+                : 'Send the current refined YAML + your follow-up back through the LLM.'}"
+                >${m.busy
+                ? "Thinking…"
+                : m.refinedSource === "deterministic"
+                    ? "🤖 Refine further with LLM"
+                    : "🤖 Refine again"}</button>
+              </div>
+            </div>`
+            : A}
         <div class="dialog-footer">
           ${!m.refinedYaml
             ? b `<button
