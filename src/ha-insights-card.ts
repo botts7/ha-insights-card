@@ -1353,16 +1353,28 @@ export class HaInsightsCard extends LitElement {
         bytes_received: number;
       }>({ type: "home_insights/audit_suggest", insight_id: insight.id });
 
+      // Loud-fail guard: if the backend didn't ship original_yaml /
+      // refined_yaml (only refined_config), the integration is
+      // running stale Python and the modal would open blank. Throw
+      // here so the user sees the persistent notification + banner,
+      // not an empty dialog.
+      if (!result.original_yaml || !result.refined_yaml) {
+        throw new Error(
+          "Audit suggest response is missing YAML fields. The integration "
+            + "needs a reload: Settings → Devices & Services → HA Insights → "
+            + "⋮ → Reload. Python caches old code until that's done.",
+        );
+      }
       // Render via the existing refine-existing-automation modal so
       // we don't ship a second YAML diff UI. Backend now serializes
       // both sides as real YAML so the side-by-side diff is readable.
       this._refineAutomationModal = {
         automationId: result.automation_id,
         alias: result.alias ?? "",
-        originalYaml: result.original_yaml ?? "",
+        originalYaml: result.original_yaml,
         feedback: "",
         busy: false,
-        refinedYaml: result.refined_yaml ?? "",
+        refinedYaml: result.refined_yaml,
         refinedConfig: result.refined_config,
         rationale: result.rationale,
         diffSummary: result.diff_summary ?? [],
