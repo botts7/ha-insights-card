@@ -262,6 +262,11 @@ class HaInsightsCard extends i {
          * max_rows explicitly. -1 means "not yet measured; use the default."
          */
         this._autoMaxRows = -1;
+        // Populated by _filtered() — the total count BEFORE the max_rows
+        // cap is applied. Used by _renderCompactTile so the dashboard tile
+        // reports the true number of insights even when the cap clips the
+        // rendered list to e.g. 1 row.
+        this._totalFilteredCount = 0;
         this._wired = false;
         this._keydownHandler = (e) => {
             if (e.key === "Escape" && this._dialogId) {
@@ -1903,6 +1908,12 @@ class HaInsightsCard extends i {
         // helper shipped, or when the store has insights from an older
         // fingerprint schema. Pure presentation transform; no WS calls.
         const deduped = this._clientSideDedup(filtered);
+        // Stash the full match count so the compact tile and "Showing X
+        // of Y" footer can report the TRUE count instead of the
+        // post-cap subset. Was previously hard-pinned to whatever
+        // max_rows said, which made the dashboard's compact tile show
+        // "1 insight" even when the user had 15 to look at.
+        this._totalFilteredCount = deduped.length;
         return deduped.slice(0, cap);
     }
     /** Group insights by (detector, normalized title). Rows that share a
@@ -2098,8 +2109,10 @@ class HaInsightsCard extends i {
       </div>
     `;
     }
-    _renderCompactTile(rows) {
-        const count = rows.length;
+    _renderCompactTile(_rows) {
+        // Report the FULL filter-matching count, not the cap-clipped one.
+        // _filtered() stashes this for us before slicing.
+        const count = this._totalFilteredCount;
         const label = count === 0
             ? "No insights yet — patterns will appear as your home settles in"
             : count === 1
@@ -3006,6 +3019,9 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_autoMaxRows", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_totalFilteredCount", void 0);
 // Guard against double-registration: ha-insights-card.js and
 // ha-insights-panel.js both ship this class (panel imports card to
 // embed it). When the user has the card resource loaded AND the

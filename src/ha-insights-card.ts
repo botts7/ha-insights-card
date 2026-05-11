@@ -100,6 +100,11 @@ export class HaInsightsCard extends LitElement {
    * max_rows explicitly. -1 means "not yet measured; use the default."
    */
   @state() private _autoMaxRows = -1;
+  // Populated by _filtered() — the total count BEFORE the max_rows
+  // cap is applied. Used by _renderCompactTile so the dashboard tile
+  // reports the true number of insights even when the cap clips the
+  // rendered list to e.g. 1 row.
+  @state() private _totalFilteredCount = 0;
 
   private _unsub?: () => void;
   private _toastTimer?: number;
@@ -1812,6 +1817,12 @@ export class HaInsightsCard extends LitElement {
     // fingerprint schema. Pure presentation transform; no WS calls.
     const deduped = this._clientSideDedup(filtered);
 
+    // Stash the full match count so the compact tile and "Showing X
+    // of Y" footer can report the TRUE count instead of the
+    // post-cap subset. Was previously hard-pinned to whatever
+    // max_rows said, which made the dashboard's compact tile show
+    // "1 insight" even when the user had 15 to look at.
+    this._totalFilteredCount = deduped.length;
     return deduped.slice(0, cap);
   }
 
@@ -2014,8 +2025,10 @@ export class HaInsightsCard extends LitElement {
     `;
   }
 
-  private _renderCompactTile(rows: Insight[]): TemplateResult {
-    const count = rows.length;
+  private _renderCompactTile(_rows: Insight[]): TemplateResult {
+    // Report the FULL filter-matching count, not the cap-clipped one.
+    // _filtered() stashes this for us before slicing.
+    const count = this._totalFilteredCount;
     const label = count === 0
       ? "No insights yet — patterns will appear as your home settles in"
       : count === 1
