@@ -1134,7 +1134,7 @@ export class HaInsightsCard extends LitElement {
           ? { ...basePayload, ...(edits ?? {}) }
           : undefined;
 
-      const message: Record<string, unknown> = {
+      const message: { type: string; insight_id: string; payload_override?: Record<string, unknown> } = {
         type: "home_insights/apply",
         insight_id: insight.id,
       };
@@ -1378,7 +1378,12 @@ export class HaInsightsCard extends LitElement {
         // sees the regular refine error path if it really is broken.
       }
 
-      const message: Record<string, unknown> = {
+      const message: {
+        type: string;
+        insight_id: string;
+        feedback?: string;
+        conversation_id?: string;
+      } = {
         type: "home_insights/refine",
         insight_id: insight.id,
       };
@@ -1582,7 +1587,11 @@ export class HaInsightsCard extends LitElement {
     this._testBusy = true;
     this._testResults = undefined;
     try {
-      const payload: Record<string, unknown> = {
+      const payload: {
+        type: string;
+        insight_id: string;
+        payload_override?: Record<string, unknown>;
+      } = {
         type: "home_insights/test_actions",
         insight_id: insight.id,
       };

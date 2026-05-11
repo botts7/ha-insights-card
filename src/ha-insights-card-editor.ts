@@ -147,7 +147,7 @@ export class HaInsightsCardEditor extends LitElement {
     if (this._config?.type && !("type" in incoming)) {
       incoming.type = this._config.type;
     }
-    const next = incoming as CardConfig;
+    const next = incoming as unknown as CardConfig;
     this._config = next;
     this.dispatchEvent(
       new CustomEvent("config-changed", {
