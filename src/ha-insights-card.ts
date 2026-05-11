@@ -2017,7 +2017,16 @@ export class HaInsightsCard extends LitElement {
         <div class="row-meta">
           <span class="pill ${confidenceClass}">confidence ${confidencePct}%</span>
           <span class="pill">${insight.detector}</span>
-          ${insight.area_id ? html`<span class="pill">${insight.area_id}</span>` : nothing}
+          ${insight.area_id
+            ? html`<span class="pill">${insight.area_name ?? insight.area_id}</span>`
+            : nothing}
+          ${insight.integration
+            ? html`<span
+                class="pill"
+                style="color: var(--secondary-text-color); background: rgba(76, 110, 245, 0.10);"
+                title="Source integration for this entity. Useful context when deciding whether the schedule lives in HA (here) or in the vendor app (look for 🏷️ pill)."
+              >🔌 ${insight.integration}</span>`
+            : nothing}
           ${this._renderTrustPill()}
           ${ageLabel
             ? html`<span class="pill" title=${insight.created_at}>${ageLabel}</span>`

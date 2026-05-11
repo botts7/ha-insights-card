@@ -2108,7 +2108,16 @@ class HaInsightsCard extends i {
         <div class="row-meta">
           <span class="pill ${confidenceClass}">confidence ${confidencePct}%</span>
           <span class="pill">${insight.detector}</span>
-          ${insight.area_id ? b `<span class="pill">${insight.area_id}</span>` : A}
+          ${insight.area_id
+            ? b `<span class="pill">${insight.area_name ?? insight.area_id}</span>`
+            : A}
+          ${insight.integration
+            ? b `<span
+                class="pill"
+                style="color: var(--secondary-text-color); background: rgba(76, 110, 245, 0.10);"
+                title="Source integration for this entity. Useful context when deciding whether the schedule lives in HA (here) or in the vendor app (look for 🏷️ pill)."
+              >🔌 ${insight.integration}</span>`
+            : A}
           ${this._renderTrustPill()}
           ${ageLabel
             ? b `<span class="pill" title=${insight.created_at}>${ageLabel}</span>`
