@@ -290,6 +290,20 @@ class HaInsightsCard extends i {
                 this._scanInProgress = false;
                 return;
             }
+            // Refresh hello in parallel so the footer + protocol-skew banner
+            // reflect the latest deploy (otherwise the card holds onto the
+            // version it saw at first mount until a manual page reload).
+            try {
+                const hello = await this.hass.connection.sendMessagePromise({
+                    type: "home_insights/hello",
+                    card_version: "0.8.2",
+                });
+                this._hello = hello;
+            }
+            catch (err) {
+                // Non-fatal — list-refresh is the user-visible bit
+                console.debug("ha-insights-card hello refresh failed", err);
+            }
             try {
                 const result = await this.hass.connection.sendMessagePromise({
                     type: "home_insights/list",

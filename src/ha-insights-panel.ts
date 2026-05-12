@@ -105,6 +105,11 @@ export class HaInsightsPanel extends LitElement {
   // Persistent filter storage (v0.8 phase 6). Versioned key so future
   // shape changes can ignore old saved state cleanly.
   private static readonly _STORAGE_KEY = "ha-insights-panel-filters-v1";
+  // Schema version embedded INSIDE the stored JSON. Bump when adding /
+  // removing / renaming filter state fields. On mismatch we silently
+  // discard and start fresh — avoids carrying ghost lists from earlier
+  // versions of the panel into a release where the field shape changed.
+  private static readonly _STORAGE_SCHEMA_VERSION = 2;
 
   static styles = css`
     :host {
@@ -540,6 +545,13 @@ export class HaInsightsPanel extends LitElement {
       const raw = window.localStorage.getItem(HaInsightsPanel._STORAGE_KEY);
       if (!raw) return;
       const saved = JSON.parse(raw);
+      // Schema-version gate. Drop the saved state if it predates the
+      // current schema — better to lose the user's filters than show
+      // them stale data they can't see the shape of.
+      if (saved.v !== HaInsightsPanel._STORAGE_SCHEMA_VERSION) {
+        window.localStorage.removeItem(HaInsightsPanel._STORAGE_KEY);
+        return;
+      }
       if (typeof saved.search === "string") this._search = saved.search;
       if (typeof saved.minConfidence === "number") {
         this._minConfidence = saved.minConfidence;
@@ -600,6 +612,7 @@ export class HaInsightsPanel extends LitElement {
       window.localStorage.setItem(
         HaInsightsPanel._STORAGE_KEY,
         JSON.stringify({
+          v: HaInsightsPanel._STORAGE_SCHEMA_VERSION,
           search: this._search,
           minConfidence: this._minConfidence,
           sortBy: this._sortBy,

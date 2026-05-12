@@ -290,6 +290,20 @@ class HaInsightsCard extends i {
                 this._scanInProgress = false;
                 return;
             }
+            // Refresh hello in parallel so the footer + protocol-skew banner
+            // reflect the latest deploy (otherwise the card holds onto the
+            // version it saw at first mount until a manual page reload).
+            try {
+                const hello = await this.hass.connection.sendMessagePromise({
+                    type: "home_insights/hello",
+                    card_version: "0.8.2",
+                });
+                this._hello = hello;
+            }
+            catch (err) {
+                // Non-fatal — list-refresh is the user-visible bit
+                console.debug("ha-insights-card hello refresh failed", err);
+            }
             try {
                 const result = await this.hass.connection.sendMessagePromise({
                     type: "home_insights/list",
@@ -3881,6 +3895,11 @@ class HaInsightsPanel extends i {
     // Persistent filter storage (v0.8 phase 6). Versioned key so future
     // shape changes can ignore old saved state cleanly.
     static { this._STORAGE_KEY = "ha-insights-panel-filters-v1"; }
+    // Schema version embedded INSIDE the stored JSON. Bump when adding /
+    // removing / renaming filter state fields. On mismatch we silently
+    // discard and start fresh — avoids carrying ghost lists from earlier
+    // versions of the panel into a release where the field shape changed.
+    static { this._STORAGE_SCHEMA_VERSION = 2; }
     static { this.styles = i$3 `
     :host {
       display: block;
@@ -4228,6 +4247,13 @@ class HaInsightsPanel extends i {
             if (!raw)
                 return;
             const saved = JSON.parse(raw);
+            // Schema-version gate. Drop the saved state if it predates the
+            // current schema — better to lose the user's filters than show
+            // them stale data they can't see the shape of.
+            if (saved.v !== HaInsightsPanel._STORAGE_SCHEMA_VERSION) {
+                window.localStorage.removeItem(HaInsightsPanel._STORAGE_KEY);
+                return;
+            }
             if (typeof saved.search === "string")
                 this._search = saved.search;
             if (typeof saved.minConfidence === "number") {
@@ -4274,6 +4300,7 @@ class HaInsightsPanel extends i {
     _saveFilters() {
         try {
             window.localStorage.setItem(HaInsightsPanel._STORAGE_KEY, JSON.stringify({
+                v: HaInsightsPanel._STORAGE_SCHEMA_VERSION,
                 search: this._search,
                 minConfidence: this._minConfidence,
                 sortBy: this._sortBy,
