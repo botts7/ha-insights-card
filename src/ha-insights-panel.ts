@@ -832,6 +832,9 @@ export class HaInsightsPanel extends LitElement {
   private async _runBackfill(): Promise<void> {
     if (!this.hass) return;
     this._backfillBusy = true;
+    // Backfill triggers a re-scan internally; hide live mutations
+    // until both phases complete.
+    window.dispatchEvent(new CustomEvent("ha-insights-scan-start"));
     try {
       await this.hass.connection.sendMessagePromise({
         type: "call_service",
@@ -878,6 +881,11 @@ export class HaInsightsPanel extends LitElement {
     // the scan was still running, with no in-progress feedback.
     this._scanBusy = true;
     this._showToast("Scanning…");
+    // Tell the embedded card to hide its live insight list behind a
+    // "Scanning…" curtain. The subscribe stream still mutates state in
+    // the background; the curtain just hides the transient un-deduped
+    // view. Cleared by the matching refresh dispatch below.
+    window.dispatchEvent(new CustomEvent("ha-insights-scan-start"));
     try {
       const result = await this.hass.connection.sendMessagePromise<{
         detectors_run: string[];

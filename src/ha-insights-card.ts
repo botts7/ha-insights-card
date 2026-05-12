@@ -38,6 +38,11 @@ export class HaInsightsCard extends LitElement {
    * the main card where they'd hide the rows. */
   @state() private _modalError?: string;
   @state() private _loading = true;
+  // True while a scan is in flight — render method shows a "Scanning…"
+  // curtain instead of the live-mutating insight list. Cleared by the
+  // ha-insights-refresh handler (which also fetches the canonical
+  // post-scan view).
+  @state() private _scanInProgress = false;
   @state() private _busyId?: string;
   @state() private _toast?: string;
   @state() private _dialogId?: string;
@@ -216,6 +221,30 @@ export class HaInsightsCard extends LitElement {
       gap: 8px;
       justify-content: center;
       flex-wrap: wrap;
+    }
+    .empty-scanning {
+      padding: 56px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .empty-scanning .empty-sub {
+      color: var(--secondary-text-color);
+      font-size: 0.85em;
+    }
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid var(--divider-color, rgba(0, 0, 0, 0.18));
+      border-top-color: var(--primary-color);
+      border-radius: 50%;
+      animation: ha-insights-spin 0.8s linear infinite;
+    }
+    @keyframes ha-insights-spin {
+      to {
+        transform: rotate(360deg);
+      }
     }
     .empty-actions a,
     .empty-actions button {
@@ -944,10 +973,13 @@ export class HaInsightsCard extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener("keydown", this._keydownHandler);
-    // Listen for explicit refresh requests from the parent panel (panel
-    // dispatches this after its own Scan / Purge / Backfill buttons so
-    // the card pulls a fresh ws_list — guarantees the deduped view
-    // reaches the UI even when subscribe-stream events alone wouldn't).
+    // Panel dispatches these around its Scan / Purge / Backfill flows
+    // so we can show a clean loading state instead of the noisy
+    // subscribe-stream rows piling up live + getting re-deduped at the end.
+    window.addEventListener(
+      "ha-insights-scan-start",
+      this._scanStarted as EventListener,
+    );
     window.addEventListener(
       "ha-insights-refresh",
       this._refreshFromEvent as EventListener,
@@ -960,8 +992,15 @@ export class HaInsightsCard extends LitElement {
     this._resizeObserver.observe(this);
   }
 
+  private _scanStarted = (): void => {
+    this._scanInProgress = true;
+  };
+
   private _refreshFromEvent = async (): Promise<void> => {
-    if (!this.hass) return;
+    if (!this.hass) {
+      this._scanInProgress = false;
+      return;
+    }
     try {
       const result = await this.hass.connection.sendMessagePromise<{
         insights: Insight[];
@@ -972,6 +1011,8 @@ export class HaInsightsCard extends LitElement {
       this._insights = result.insights ?? [];
     } catch (err) {
       console.warn("ha-insights-card refresh-from-event failed", err);
+    } finally {
+      this._scanInProgress = false;
     }
   };
 
@@ -1021,6 +1062,10 @@ export class HaInsightsCard extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     window.removeEventListener("keydown", this._keydownHandler);
+    window.removeEventListener(
+      "ha-insights-scan-start",
+      this._scanStarted as EventListener,
+    );
     window.removeEventListener(
       "ha-insights-refresh",
       this._refreshFromEvent as EventListener,
@@ -3567,6 +3612,24 @@ export class HaInsightsCard extends LitElement {
         <ha-card>
           ${this._renderHeader()}
           <div class="empty">Loading…</div>
+        </ha-card>
+      `;
+    }
+    // Scan-in-progress curtain. Hides the live-mutating subscribe stream
+    // until the canonical post-scan ws_list lands via _refreshFromEvent.
+    // Header stays visible so the user has context + can still click the
+    // Stop button or other controls.
+    if (this._scanInProgress) {
+      return html`
+        <ha-card>
+          ${this._renderHeader()}
+          <div class="empty empty-scanning">
+            <div class="spinner" aria-hidden="true"></div>
+            <div>Scanning…</div>
+            <div class="empty-sub">
+              Running detectors. Results appear when the scan finishes.
+            </div>
+          </div>
         </ha-card>
       `;
     }
