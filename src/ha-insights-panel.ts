@@ -38,6 +38,29 @@ export class HaInsightsPanel extends LitElement {
   @state() private _backfillBusy = false;
   @state() private _bulkBusy = false;
   @state() private _scanBusy = false;
+  @state() private _rollupBusy = false;
+  @state() private _rollupProgress: {
+    running: boolean;
+    total: number;
+    processed: number;
+    errors: number;
+    timed_out: number;
+    current_entity_id: string | null;
+    started_ts: number | null;
+    finished_ts: number | null;
+    window_days: number;
+    elapsed_sec?: number;
+    eta_sec?: number;
+    last_summary?: Record<string, unknown> | null;
+  } | null = null;
+  private _rollupPollTimer: number | null = null;
+  @state() private _recorderStatus: {
+    purge_keep_days: number | null;
+    oldest_record_age_days: number | null;
+    available_window_days: number | null;
+    configured_audit_window_days: number | null;
+    effective_window_days: number | null;
+  } | null = null;
   // v1.1 panel filters — chip-style multi-select. Empty array = no filter.
   // Persisted alongside search/confidence/sort in localStorage.
   @state() private _filterDomains: string[] = [];
@@ -302,6 +325,96 @@ export class HaInsightsPanel extends LitElement {
     .detector-chip.is-active .detector-chip-count {
       background: rgba(255, 255, 255, 0.25);
     }
+    .rollup-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 8px 16px;
+      border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.1));
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.03));
+      font-size: 0.85em;
+    }
+    .rollup-bar-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .rollup-bar {
+      flex: 1 1 200px;
+      min-width: 160px;
+      height: 8px;
+      background: var(--divider-color, rgba(0, 0, 0, 0.12));
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .rollup-bar-fill {
+      height: 100%;
+      transition: width 300ms ease-out;
+      background: var(--primary-color);
+    }
+    .rollup-bar-fill.is-running {
+      background: linear-gradient(
+        90deg,
+        var(--primary-color) 0%,
+        var(--primary-color) 50%,
+        rgba(255, 255, 255, 0.4) 100%
+      );
+      background-size: 200% 100%;
+      animation: rollup-shimmer 1.6s linear infinite;
+    }
+    .rollup-bar-fill.is-done {
+      background: var(--success-color, #4caf50);
+    }
+    @keyframes rollup-shimmer {
+      from {
+        background-position: 100% 0;
+      }
+      to {
+        background-position: -100% 0;
+      }
+    }
+    .rollup-stat {
+      color: var(--secondary-text-color);
+      white-space: nowrap;
+    }
+    .rollup-stat-done {
+      color: var(--success-color, #4caf50);
+    }
+    .rollup-stat code {
+      background: var(--divider-color, rgba(0, 0, 0, 0.08));
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-family: var(--code-font-family, "Roboto Mono", monospace);
+      font-size: 0.9em;
+    }
+    .rollup-hint {
+      color: var(--secondary-text-color);
+      font-size: 0.9em;
+    }
+    .rollup-hint strong {
+      color: var(--primary-text-color);
+    }
+    .rollup-hint-warn {
+      color: var(--warning-color, #ff9800);
+    }
+    .rollup-hint-warn strong {
+      color: var(--warning-color, #ff9800);
+    }
+    .rollup-hint-tip {
+      margin-top: 4px;
+      padding: 6px 8px;
+      background: rgba(255, 152, 0, 0.08);
+      border-left: 3px solid var(--warning-color, #ff9800);
+      border-radius: 4px;
+      font-size: 0.95em;
+    }
+    .rollup-hint-tip code {
+      background: rgba(0, 0, 0, 0.08);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: var(--code-font-family, "Roboto Mono", monospace);
+    }
     @media (max-width: 600px) {
       .header,
       .filters,
@@ -322,6 +435,12 @@ export class HaInsightsPanel extends LitElement {
       "insights-loaded",
       this._onInsightsLoaded as EventListener,
     );
+    // One-shot recorder status read so the rollup section can show
+    // the user's real available window without polling.
+    void this._fetchRecorderStatus();
+    // Cold-poll once in case a rollup is already running when the
+    // panel mounts (e.g. user navigated away mid-batch and came back).
+    void this._pollRollupProgress();
   }
 
   disconnectedCallback(): void {
@@ -330,6 +449,7 @@ export class HaInsightsPanel extends LitElement {
       "insights-loaded",
       this._onInsightsLoaded as EventListener,
     );
+    this._stopRollupPoll();
   }
 
   protected updated(): void {
@@ -544,6 +664,169 @@ export class HaInsightsPanel extends LitElement {
       };
     }
     return this._cachedCardConfig!;
+  }
+
+  private async _runAuditRollup(): Promise<void> {
+    if (!this.hass || this._rollupBusy) return;
+    this._rollupBusy = true;
+    this._rollupLoopAborted = false;
+    this._rollupLoopStartTs = Date.now();
+    try {
+      // v1.2 loop-mode: single click chains batches until all
+      // entities are caught up OR a 5-minute ceiling. Each batch
+      // is bounded by the backend's 120s budget + single-flight
+      // lock, so we're not bypassing safety — just removing the
+      // "click 12 times" UX cliff. User can stop via the Stop
+      // button which sets _rollupLoopAborted.
+      this.hass.connection
+        .sendMessagePromise({
+          type: "call_service",
+          domain: "ha_insights",
+          service: "run_audit_rollup",
+          service_data: {},
+        })
+        .catch((err) => {
+          this._showToast(
+            `Rollup failed to start: ${(err as { message?: string }).message ?? String(err)}`,
+          );
+        });
+      // Kick the poll right away so the bar shows before the first
+      // 2-second interval fires.
+      await this._pollRollupProgress();
+      this._startRollupPoll();
+    } finally {
+      // _rollupBusy stays sticky until the polled `running` flag
+      // turns false in _pollRollupProgress.
+    }
+  }
+
+  /** Hard ceiling on the auto-chain so a runaway backend can't
+   *  loop forever. 5 minutes covers ≥ 1000 entities at typical
+   *  rates while bounding worst-case user wait. */
+  private static readonly _ROLLUP_LOOP_CEILING_MS = 5 * 60 * 1000;
+  private _rollupLoopAborted = false;
+  private _rollupLoopStartTs = 0;
+
+  private _stopRollupLoop(): void {
+    this._rollupLoopAborted = true;
+  }
+
+  private _startRollupPoll(): void {
+    if (this._rollupPollTimer !== null) return;
+    this._rollupPollTimer = window.setInterval(
+      () => void this._pollRollupProgress(),
+      2000,
+    );
+  }
+
+  private _stopRollupPoll(): void {
+    if (this._rollupPollTimer !== null) {
+      window.clearInterval(this._rollupPollTimer);
+      this._rollupPollTimer = null;
+    }
+  }
+
+  private async _pollRollupProgress(): Promise<void> {
+    if (!this.hass) return;
+    try {
+      const snap = (await this.hass.connection.sendMessagePromise({
+        type: "home_insights/rollup_progress",
+      })) as NonNullable<typeof this._rollupProgress>;
+      this._rollupProgress = snap;
+      if (!snap.running) {
+        this._rollupBusy = false;
+        this._stopRollupPoll();
+        if (snap.last_summary && snap.finished_ts) {
+          const s = snap.last_summary as {
+            entities_processed?: number;
+            errors?: number;
+            timed_out_entities?: string[];
+            batch_duration_sec?: number;
+            next_due_count?: number;
+            skipped_inflight?: boolean;
+          };
+          const processed = s.entities_processed ?? 0;
+          const remaining = s.next_due_count ?? 0;
+          const timedOut = (s.timed_out_entities ?? []).length;
+          const elapsedMs = Date.now() - this._rollupLoopStartTs;
+          const underCeiling =
+            elapsedMs < HaInsightsPanel._ROLLUP_LOOP_CEILING_MS;
+
+          // Loop-mode: if there's still work AND user hasn't
+          // stopped AND we're under the 5-min ceiling, chain
+          // another batch. Otherwise emit the final toast.
+          const shouldChain =
+            remaining > 0 &&
+            processed > 0 && // forward progress is happening
+            !this._rollupLoopAborted &&
+            !s.skipped_inflight &&
+            underCeiling;
+
+          if (shouldChain) {
+            // Restart the next batch + keep polling. Brief courtesy
+            // pause lets the recorder breathe between batches.
+            window.setTimeout(() => {
+              if (!this.hass || this._rollupLoopAborted) return;
+              this._rollupBusy = true;
+              this.hass.connection
+                .sendMessagePromise({
+                  type: "call_service",
+                  domain: "ha_insights",
+                  service: "run_audit_rollup",
+                  service_data: {},
+                })
+                .catch((err) => {
+                  this._showToast(
+                    `Rollup chain failed: ${(err as { message?: string }).message ?? String(err)}`,
+                  );
+                  this._rollupBusy = false;
+                });
+              void this._pollRollupProgress();
+              this._startRollupPoll();
+            }, 1500);
+            return; // don't show terminal toast yet
+          }
+
+          let message: string;
+          if (s.skipped_inflight) {
+            message = "Rollup already running — try again in a moment";
+          } else if (processed === 0 && remaining === 0 && timedOut === 0) {
+            message = "All audit rollups are already up to date ✓";
+          } else if (processed === 0 && timedOut > 0) {
+            message = `No progress — ${timedOut} entities timed out, will retry`;
+          } else if (remaining === 0) {
+            message = `Rollup complete: ${processed} entities caught up · all up to date ✓`;
+          } else if (this._rollupLoopAborted) {
+            message = `Rollup stopped: ${remaining} entities still queued`;
+          } else if (!underCeiling) {
+            message = `Rollup hit 5-min ceiling: ${remaining} entities still queued — click again to continue`;
+          } else {
+            message = `Rollup batch: ${processed} advanced · ${remaining} still need work`;
+          }
+          if (s.batch_duration_sec) {
+            message += ` (${s.batch_duration_sec}s)`;
+          }
+          this._showToast(message);
+        }
+      }
+    } catch (err) {
+      // Endpoint not registered yet (e.g. backend not deployed) — give
+      // up quietly. Without this guard the poll would spam errors
+      // every 2s on older installs.
+      this._stopRollupPoll();
+      this._rollupBusy = false;
+    }
+  }
+
+  private async _fetchRecorderStatus(): Promise<void> {
+    if (!this.hass) return;
+    try {
+      this._recorderStatus = (await this.hass.connection.sendMessagePromise({
+        type: "home_insights/recorder_status",
+      })) as NonNullable<typeof this._recorderStatus>;
+    } catch {
+      // Endpoint may not exist on older backends — leave null.
+    }
   }
 
   private async _runBackfill(): Promise<void> {
@@ -880,6 +1163,23 @@ export class HaInsightsPanel extends LitElement {
           </button>
           <button
             class="action"
+            ?disabled=${this._rollupBusy}
+            title="Recompute long-term audit rollups (day-of-week / month-of-year buckets) from HA's recorder. Single click chains batches until everything is caught up OR 5-minute ceiling — Stop button interrupts."
+            @click=${this._runAuditRollup}
+          >
+            ${this._rollupBusy ? "Rolling up…" : "📅 Run audit rollup"}
+          </button>
+          ${this._rollupBusy
+            ? html`<button
+                class="action"
+                title="Stop chaining batches. The current batch finishes; no new batch is started."
+                @click=${this._stopRollupLoop}
+              >
+                ⏹ Stop rollup
+              </button>`
+            : ""}
+          <button
+            class="action"
             ?disabled=${this._scanBusy}
             title="Run all detectors against the current buffer"
             @click=${this._runScanNow}
@@ -919,6 +1219,7 @@ export class HaInsightsPanel extends LitElement {
           </button>
         </div>
       </div>
+      ${this._renderRollupProgress()}
       <div class="filters">
         <input
           type="search"
@@ -1023,6 +1324,104 @@ export class HaInsightsPanel extends LitElement {
    *  Clicking a chip toggles that detector into / out of the detector
    *  filter — fastest way to "show me only the cooccurrence ones". The
    *  active chip is visually emphasized so you can tell what's filtered. */
+  private _renderRollupProgress(): TemplateResult | "" {
+    const p = this._rollupProgress;
+    const rec = this._recorderStatus;
+    // Always render the recorder-window hint row when we have it so
+    // users can see what window the rollup will actually fill — even
+    // when no batch is in flight.
+    let hint: TemplateResult | "" = "";
+    if (rec) {
+      const cfg = rec.configured_audit_window_days;
+      const eff = rec.effective_window_days;
+      const keep = rec.purge_keep_days;
+      const clamped =
+        cfg !== null && eff !== null && eff < cfg;
+      hint = html`<div class="rollup-hint">
+        ${cfg !== null
+          ? html`Audit window: <strong>${cfg}</strong> days configured`
+          : ""}
+        ${keep !== null
+          ? html` · recorder keeps <strong>${keep}</strong> days`
+          : ""}
+        ${rec.oldest_record_age_days !== null
+          ? html` · oldest row
+              <strong>${rec.oldest_record_age_days}</strong> days ago`
+          : ""}
+        ${eff !== null
+          ? html` · <span class=${clamped ? "rollup-hint-warn" : ""}
+              >effective <strong>${eff}</strong> days${clamped
+                ? " (limited by recorder)"
+                : ""}</span
+            >`
+          : ""}
+        ${clamped
+          ? html`<div class="rollup-hint-tip">
+              <strong>Good news:</strong> v1.2 incremental rollup is
+              active — once a day is rolled up, its bucket counts
+              are kept in HA Insights' own SQLite and
+              <em>survive recorder purges</em>. You don't need to
+              keep a huge recorder DB to build long-term seasonal
+              patterns. Enable
+              <code>Auto-refresh audit rollups every 6h</code> in
+              Configure and the buckets accumulate over time. The
+              effective window above is what's available
+              <em>right now</em> for first-time backfill.
+              ${keep !== null && keep < 30
+                ? html` Default HA recorder retains
+                    <strong>${keep}</strong> days — bumping
+                    <code>recorder.purge_keep_days</code> in
+                    <code>configuration.yaml</code> speeds up the
+                    initial backfill but isn't required long term.`
+                : ""}
+            </div>`
+          : ""}
+      </div>`;
+    }
+    if (!p || (!p.running && !p.last_summary)) {
+      return hint
+        ? html`<div class="rollup-row">${hint}</div>`
+        : "";
+    }
+    const pct =
+      p.total > 0 ? Math.min(100, Math.round((p.processed / p.total) * 100)) : 0;
+    const eta =
+      p.eta_sec !== undefined && p.running
+        ? ` · ETA ${this._formatSec(p.eta_sec)}`
+        : "";
+    const summary = p.running
+      ? html`<span class="rollup-stat">
+          ${p.processed}/${p.total} (${pct}%) · ${p.window_days}d window${eta}
+          ${p.current_entity_id
+            ? html` · <code>${p.current_entity_id}</code>`
+            : ""}
+          ${p.errors ? html` · ${p.errors} err` : ""}
+          ${p.timed_out ? html` · ${p.timed_out} timeout` : ""}
+        </span>`
+      : html`<span class="rollup-stat rollup-stat-done">
+          Last run: ${p.processed} done${p.errors ? `, ${p.errors} err` : ""}${p.timed_out ? `, ${p.timed_out} timeout` : ""}
+        </span>`;
+    return html`<div class="rollup-row">
+      <div class="rollup-bar-wrap">
+        <div class="rollup-bar">
+          <div
+            class="rollup-bar-fill ${p.running ? "is-running" : "is-done"}"
+            style="width: ${p.running ? pct : 100}%"
+          ></div>
+        </div>
+        ${summary}
+      </div>
+      ${hint}
+    </div>`;
+  }
+
+  private _formatSec(s: number): string {
+    if (s < 60) return `${Math.round(s)}s`;
+    const m = Math.floor(s / 60);
+    const r = Math.round(s % 60);
+    return r ? `${m}m ${r}s` : `${m}m`;
+  }
+
   private _renderDetectorCounts(): TemplateResult | "" {
     const detectors = Object.keys(this._detectorCounts);
     if (detectors.length === 0) return "";
