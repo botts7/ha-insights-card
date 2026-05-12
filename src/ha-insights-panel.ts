@@ -857,6 +857,9 @@ export class HaInsightsPanel extends LitElement {
         service: "scan_now",
         service_data: {},
       });
+      // Force a card re-fetch so the deduped post-scan view reaches
+      // the UI instead of accumulating raw subscribe-stream rows.
+      window.dispatchEvent(new CustomEvent("ha-insights-refresh"));
     } catch (err) {
       this._showToast(
         `Backfill failed: ${(err as { message?: string }).message ?? String(err)}`,
@@ -895,6 +898,11 @@ export class HaInsightsPanel extends LitElement {
         parts.push(`${result.suppressed_as_duplicate} dup-of-existing-automation suppressed`);
       }
       this._showToast(parts.join(" · "));
+      // Tell the embedded card to re-fetch insights via ws_list. Without
+      // this, the card's subscribe stream may have accumulated stale
+      // pre-dedup rows from the in-progress scan; ws_list returns the
+      // canonical deduped view.
+      window.dispatchEvent(new CustomEvent("ha-insights-refresh"));
     } catch (err) {
       this._showToast(
         `Scan failed: ${(err as { message?: string }).message ?? String(err)}`,
@@ -968,6 +976,7 @@ export class HaInsightsPanel extends LitElement {
         service_data: {},
       });
       this._showToast("Purged all insights");
+      window.dispatchEvent(new CustomEvent("ha-insights-refresh"));
     } catch (err) {
       this._showToast(
         `Purge failed: ${(err as { message?: string }).message ?? String(err)}`,

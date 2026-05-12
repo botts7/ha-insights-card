@@ -277,6 +277,20 @@ class HaInsightsCard extends i {
                 this._closeDialog();
             }
         };
+        this._refreshFromEvent = async () => {
+            if (!this.hass)
+                return;
+            try {
+                const result = await this.hass.connection.sendMessagePromise({
+                    type: "home_insights/list",
+                    include_applied: Boolean(this._config.include_applied),
+                });
+                this._insights = result.insights ?? [];
+            }
+            catch (err) {
+                console.warn("ha-insights-card refresh-from-event failed", err);
+            }
+        };
     }
     static { this.styles = i$3 `
     :host {
@@ -1086,6 +1100,11 @@ class HaInsightsCard extends i {
     connectedCallback() {
         super.connectedCallback();
         window.addEventListener("keydown", this._keydownHandler);
+        // Listen for explicit refresh requests from the parent panel (panel
+        // dispatches this after its own Scan / Purge / Backfill buttons so
+        // the card pulls a fresh ws_list — guarantees the deduped view
+        // reaches the UI even when subscribe-stream events alone wouldn't).
+        window.addEventListener("ha-insights-refresh", this._refreshFromEvent);
         this._resizeObserver = new ResizeObserver((entries) => {
             for (const entry of entries) {
                 this._updateAutoMaxRows(entry.contentRect.height);
@@ -1134,6 +1153,7 @@ class HaInsightsCard extends i {
     disconnectedCallback() {
         super.disconnectedCallback();
         window.removeEventListener("keydown", this._keydownHandler);
+        window.removeEventListener("ha-insights-refresh", this._refreshFromEvent);
         document.body.style.overflow = "";
         this._unsub?.();
         this._unsub = undefined;
