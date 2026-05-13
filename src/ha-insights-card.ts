@@ -2013,6 +2013,28 @@ export class HaInsightsCard extends LitElement {
     this._testResults = undefined;
   }
 
+  /** Heading for the payload view, based on payload_format.
+   * Stops the modal from labelling a "report" or "blueprint" payload
+   * as "Automation that would be created" — confusing for SetupQuality
+   * tier rows and orphan_device anomalies that aren't applyable. */
+  private _payloadHeading(format: string | undefined): string {
+    switch (format) {
+      case "automation":
+        return "Automation that would be created";
+      case "blueprint":
+        return "Blueprint that would be created";
+      case "card":
+        return "Card that would be added";
+      case "group":
+        return "Group that would be created";
+      case "scene":
+        return "Scene that would be created";
+      case "report":
+      default:
+        return "Details";
+    }
+  }
+
   private _renderPayloadView(
     insight: Insight,
     basePayload?: Record<string, unknown>,
@@ -3456,7 +3478,7 @@ export class HaInsightsCard extends LitElement {
                       ? html`<span class="pill" style="color: var(--warning-color)">conflicts</span>`
                       : nothing}
                   </div>
-                  <h4>Automation that would be created</h4>
+                  <h4>${this._payloadHeading(insight.payload_format)}</h4>
                   ${this._renderPayloadView(insight)}
                   ${insight.explanation
                     ? html`<div class="explanation">${insight.explanation}</div>`
@@ -3487,7 +3509,7 @@ export class HaInsightsCard extends LitElement {
                           </button>
                         `
                       : nothing}
-                    ${llmEnabled
+                    ${llmEnabled && insight.payload_format === "automation"
                       ? html`
                           <button
                             class="action ${this._refineBusy ? "busy-pulse" : ""}"
@@ -3515,6 +3537,10 @@ export class HaInsightsCard extends LitElement {
                                 🔁 Reset conversation
                               </button>`
                             : nothing}
+                        `
+                      : nothing}
+                    ${llmEnabled
+                      ? html`
                           <button
                             class="action"
                             ?disabled=${this._previewBusy}
@@ -3557,14 +3583,16 @@ export class HaInsightsCard extends LitElement {
                           </button>
                         `
                       : nothing}
-                    <button
-                      class="action"
-                      ?disabled=${this._testBusy}
-                      title="Fire the action(s) for real"
-                      @click=${() => this._testActions(insight)}
-                    >
-                      ${this._testBusy ? "testing…" : "🔥 Test actions"}
-                    </button>
+                    ${insight.payload_format === "automation"
+                      ? html`<button
+                          class="action"
+                          ?disabled=${this._testBusy}
+                          title="Fire the action(s) for real"
+                          @click=${() => this._testActions(insight)}
+                        >
+                          ${this._testBusy ? "testing…" : "🔥 Test actions"}
+                        </button>`
+                      : nothing}
                   </div>
                   ${!llmEnabled
                     ? html`<div class="subtitle" style="margin-top: 12px;">
@@ -3595,13 +3623,15 @@ export class HaInsightsCard extends LitElement {
                       >
                         ${busy ? "undoing…" : "↶ Undo apply"}
                       </button>`
-                    : html`<button
-                        class="action primary"
-                        ?disabled=${busy}
-                        @click=${() => this._apply(insight)}
-                      >
-                        ${busy ? "applying…" : "Apply"}
-                      </button>`}
+                    : insight.payload_format === "automation"
+                      ? html`<button
+                          class="action primary"
+                          ?disabled=${busy}
+                          @click=${() => this._apply(insight)}
+                        >
+                          ${busy ? "applying…" : "Apply"}
+                        </button>`
+                      : nothing}
                 </div>
               `}
         </div>

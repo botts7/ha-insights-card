@@ -2065,6 +2065,27 @@ class HaInsightsCard extends i {
     _clearTestResults() {
         this._testResults = undefined;
     }
+    /** Heading for the payload view, based on payload_format.
+     * Stops the modal from labelling a "report" or "blueprint" payload
+     * as "Automation that would be created" — confusing for SetupQuality
+     * tier rows and orphan_device anomalies that aren't applyable. */
+    _payloadHeading(format) {
+        switch (format) {
+            case "automation":
+                return "Automation that would be created";
+            case "blueprint":
+                return "Blueprint that would be created";
+            case "card":
+                return "Card that would be added";
+            case "group":
+                return "Group that would be created";
+            case "scene":
+                return "Scene that would be created";
+            case "report":
+            default:
+                return "Details";
+        }
+    }
     _renderPayloadView(insight, basePayload) {
         const editing = this._editingPayloadFor.has(insight.id);
         const draft = this._payloadEditsById.get(insight.id);
@@ -3400,7 +3421,7 @@ class HaInsightsCard extends i {
                 ? b `<span class="pill" style="color: var(--warning-color)">conflicts</span>`
                 : A}
                   </div>
-                  <h4>Automation that would be created</h4>
+                  <h4>${this._payloadHeading(insight.payload_format)}</h4>
                   ${this._renderPayloadView(insight)}
                   ${insight.explanation
                 ? b `<div class="explanation">${insight.explanation}</div>`
@@ -3428,7 +3449,7 @@ class HaInsightsCard extends i {
                           </button>
                         `
                 : A}
-                    ${llmEnabled
+                    ${llmEnabled && insight.payload_format === "automation"
                 ? b `
                           <button
                             class="action ${this._refineBusy ? "busy-pulse" : ""}"
@@ -3456,6 +3477,10 @@ class HaInsightsCard extends i {
                                 🔁 Reset conversation
                               </button>`
                     : A}
+                        `
+                : A}
+                    ${llmEnabled
+                ? b `
                           <button
                             class="action"
                             ?disabled=${this._previewBusy}
@@ -3498,14 +3523,16 @@ class HaInsightsCard extends i {
                           </button>
                         `
                 : A}
-                    <button
-                      class="action"
-                      ?disabled=${this._testBusy}
-                      title="Fire the action(s) for real"
-                      @click=${() => this._testActions(insight)}
-                    >
-                      ${this._testBusy ? "testing…" : "🔥 Test actions"}
-                    </button>
+                    ${insight.payload_format === "automation"
+                ? b `<button
+                          class="action"
+                          ?disabled=${this._testBusy}
+                          title="Fire the action(s) for real"
+                          @click=${() => this._testActions(insight)}
+                        >
+                          ${this._testBusy ? "testing…" : "🔥 Test actions"}
+                        </button>`
+                : A}
                   </div>
                   ${!llmEnabled
                 ? b `<div class="subtitle" style="margin-top: 12px;">
@@ -3536,13 +3563,15 @@ class HaInsightsCard extends i {
                       >
                         ${busy ? "undoing…" : "↶ Undo apply"}
                       </button>`
-                : b `<button
-                        class="action primary"
-                        ?disabled=${busy}
-                        @click=${() => this._apply(insight)}
-                      >
-                        ${busy ? "applying…" : "Apply"}
-                      </button>`}
+                : insight.payload_format === "automation"
+                    ? b `<button
+                          class="action primary"
+                          ?disabled=${busy}
+                          @click=${() => this._apply(insight)}
+                        >
+                          ${busy ? "applying…" : "Apply"}
+                        </button>`
+                    : A}
                 </div>
               `}
         </div>
