@@ -38,6 +38,11 @@ export interface Insight {
   applied_artifact_id?: string | null;
   /** v0.8: ISO timestamp the 7-day undo window expires. */
   undo_window_expires_at?: string | null;
+  /** v1.4: detector maturity tier surfaced on every insight so the
+   * card can render a 🟡 BETA / 🧪 EXPERIMENTAL pill. Optional
+   * because pre-v1.4 stored insights don't carry it; default is
+   * "stable" (no badge rendered). */
+  maturity?: "stable" | "beta" | "experimental";
   /** v1.1: derived from fingerprint at WS-list time so panel chips can
    * filter by domain without re-querying. Null if no entity_id was in
    * the fingerprint (most insights have one). */

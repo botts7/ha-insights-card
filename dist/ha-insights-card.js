@@ -2573,6 +2573,7 @@ class HaInsightsCard extends i {
               >🔌 ${insight.integration}</span>`
             : A}
           ${this._renderTrustPill()}
+          ${this._renderMaturityPill(insight)}
           ${ageLabel
             ? b `<span class="pill" title=${insight.created_at}>${ageLabel}</span>`
             : A}
@@ -3261,6 +3262,41 @@ class HaInsightsCard extends i {
      *  level so users have a constant reminder of what *any* LLM action on
      *  this row will do. Suppressed in OFF mode (no LLM = no trust concern).
      */
+    /**
+     * Maturity pill — shows BETA / EXPERIMENTAL when the insight comes
+     * from a detector that hasn't been field-tested yet. STABLE insights
+     * get no pill (no chrome for the default case). Sets honest
+     * expectations so users know "this output might be wrong, please
+     * tell us" vs "this should be reliable."
+     *
+     * Sources `insight.maturity` (field on the Insight dataclass, set
+     * from the Detector class at scan time, surfaced via ws_list +
+     * subscribe).
+     */
+    _renderMaturityPill(insight) {
+        const maturity = insight.maturity;
+        if (!maturity || maturity === "stable")
+            return A;
+        if (maturity === "beta") {
+            return b `
+        <span
+          class="pill"
+          style="background: rgba(255, 193, 7, 0.18); color: #b8860b;"
+          title="BETA — this detector ships but hasn't been field-tested across diverse installs. Insights may have edge-case false positives. Dismiss feedback helps promote it to STABLE."
+        >🟡 BETA</span>
+      `;
+        }
+        if (maturity === "experimental") {
+            return b `
+        <span
+          class="pill"
+          style="background: rgba(156, 39, 176, 0.18); color: #6a1b9a;"
+          title="EXPERIMENTAL — this detector is new. Output may be inaccurate or noisy. Was this useful? Dismiss or apply to teach the project what works."
+        >🧪 EXPERIMENTAL</span>
+      `;
+        }
+        return A;
+    }
     _renderTrustPill() {
         const mode = this._hello?.privacy_mode;
         if (!mode || mode === "off")
