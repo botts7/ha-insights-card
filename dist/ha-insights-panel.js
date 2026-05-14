@@ -143,6 +143,9 @@ const SCHEMA = [
                     { value: "none", label: "No grouping" },
                     { value: "detector", label: "By detector" },
                     { value: "area", label: "By area" },
+                    { value: "floor", label: "By floor" },
+                    { value: "integration", label: "By integration" },
+                    { value: "label", label: "By label" },
                 ],
             },
         },
@@ -3181,6 +3184,7 @@ class HaInsightsCard extends i {
         const detSet = new Set(this._config.detector_filter ?? []);
         const floorSet = new Set(this._config.floor_filter ?? []);
         const integSet = new Set(this._config.integration_filter ?? []);
+        const labelSet = new Set(this._config.label_filter ?? []);
         const filtered = this._insights
             .filter((i) => i.confidence >= min)
             .filter((i) => !search || i.title.toLowerCase().includes(search))
@@ -3191,7 +3195,9 @@ class HaInsightsCard extends i {
             .filter((i) => detSet.size === 0 || detSet.has(i.detector))
             .filter((i) => floorSet.size === 0 || (i.floor_id != null && floorSet.has(i.floor_id)))
             .filter((i) => integSet.size === 0 ||
-            (i.integration != null && integSet.has(i.integration)));
+            (i.integration != null && integSet.has(i.integration)))
+            .filter((i) => labelSet.size === 0 ||
+            (Array.isArray(i.labels) && i.labels.some((l) => labelSet.has(l))));
         filtered.sort((a, b) => {
             if (sortBy === "age") {
                 // Newest first
@@ -3341,9 +3347,13 @@ class HaInsightsCard extends i {
                     ? row.floor_name ?? row.floor_id ?? "(no floor)"
                     : key === "integration"
                         ? row.integration ?? "(no integration)"
-                        : key === "detector"
-                            ? row.detector
-                            : "";
+                        : key === "label"
+                            ? (Array.isArray(row.labels) && row.labels.length > 0
+                                ? row.labels[0]
+                                : "(no label)")
+                            : key === "detector"
+                                ? row.detector
+                                : "";
             const existing = buckets.get(groupKey);
             if (existing)
                 existing.push(row);
@@ -5025,6 +5035,10 @@ class HaInsightsPanel extends i {
         // v1.2 Phase 5: floor + integration axes alongside domain/area/dc/detector.
         this._filterFloors = [];
         this._filterIntegrations = [];
+        // v1.5.28: labels (HA 2024.4+) — user-applied tags that cascade
+        // from entity → device → area. A user with `label: outdoor`,
+        // `label: critical`, etc. can slice insights by their own taxonomy.
+        this._filterLabels = [];
         // v1.2.1: depth of LLM reasoning for 🤖 Suggest. "concise" is the
         // cheap default (~150 token rules); "indepth" sends a fuller
         // protocol (~600 token rules) for tricky cases. Persists across
@@ -5044,6 +5058,8 @@ class HaInsightsPanel extends i {
         // v1.2 Phase 5
         this._availableFloors = [];
         this._availableIntegrations = [];
+        // v1.5.28: distinct labels across the loaded insight set.
+        this._availableLabels = [];
         // Area-id ↔ display-name maps populated from the loaded insight set
         // so chip dropdowns and the per-detector header show friendly labels
         // ("Living Room") instead of opaque registry ids.
@@ -5078,6 +5094,14 @@ class HaInsightsPanel extends i {
             ].sort();
             this._availableIntegrations = [
                 ...new Set(insights.map((i) => i.integration).filter((v) => !!v)),
+            ].sort();
+            // v1.5.28: distinct labels across insights. Each insight can
+            // carry multiple labels (entity + device + area cascade); flatten
+            // into a single set.
+            this._availableLabels = [
+                ...new Set(insights.flatMap((i) => Array.isArray(i.labels)
+                    ? (i.labels)
+                    : [])),
             ].sort();
             // Build id → friendly-name lookups from the loaded list. The card
             // already carries area_name + floor_name on each row when set;
@@ -5512,7 +5536,8 @@ class HaInsightsPanel extends i {
                 saved.groupBy === "detector" ||
                 saved.groupBy === "area" ||
                 saved.groupBy === "floor" ||
-                saved.groupBy === "integration") {
+                saved.groupBy === "integration" ||
+                saved.groupBy === "label") {
                 this._groupBy = saved.groupBy;
             }
             if (typeof saved.auditOpen === "boolean")
@@ -5534,6 +5559,10 @@ class HaInsightsPanel extends i {
             }
             if (Array.isArray(saved.filterIntegrations)) {
                 this._filterIntegrations = saved.filterIntegrations.filter((s) => typeof s === "string");
+            }
+            // v1.5.28: load labels chip filter from localStorage
+            if (Array.isArray(saved.filterLabels)) {
+                this._filterLabels = saved.filterLabels.filter((s) => typeof s === "string");
             }
             if (saved.auditDepth === "concise" || saved.auditDepth === "indepth") {
                 this._auditDepth = saved.auditDepth;
@@ -5558,6 +5587,7 @@ class HaInsightsPanel extends i {
                 filterDetectors: this._filterDetectors,
                 filterFloors: this._filterFloors,
                 filterIntegrations: this._filterIntegrations,
+                filterLabels: this._filterLabels,
                 auditDepth: this._auditDepth,
             }));
         }
@@ -5577,6 +5607,7 @@ class HaInsightsPanel extends i {
             `${this._filterDomains.join(",")}|${this._filterAreas.join(",")}|` +
             `${this._filterDeviceClasses.join(",")}|${this._filterDetectors.join(",")}|` +
             `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}|` +
+            `${this._filterLabels.join(",")}|` +
             `${this._auditDepth}`;
         if (this._cachedCardConfigKey !== key) {
             this._cachedCardConfigKey = key;
@@ -5598,6 +5629,7 @@ class HaInsightsPanel extends i {
                 detector_filter: this._filterDetectors,
                 floor_filter: this._filterFloors,
                 integration_filter: this._filterIntegrations,
+                label_filter: this._filterLabels,
                 audit_depth: this._auditDepth,
             };
         }
@@ -6168,6 +6200,7 @@ class HaInsightsPanel extends i {
           <option value="area">Group: Area</option>
           <option value="floor">Group: Floor</option>
           <option value="integration">Group: Integration</option>
+          <option value="label">Group: Label</option>
         </select>
         <select
           aria-label="Audit suggest analysis depth"
@@ -6211,7 +6244,8 @@ class HaInsightsPanel extends i {
             this._filterDeviceClasses.length > 0 ||
             this._filterDetectors.length > 0 ||
             this._filterFloors.length > 0 ||
-            this._filterIntegrations.length > 0);
+            this._filterIntegrations.length > 0 ||
+            this._filterLabels.length > 0);
     }
     _clearChipFilters() {
         this._filterDomains = [];
@@ -6220,6 +6254,7 @@ class HaInsightsPanel extends i {
         this._filterDetectors = [];
         this._filterFloors = [];
         this._filterIntegrations = [];
+        this._filterLabels = [];
     }
     /** A row of small chips listing each detector and its insight count.
      *  Clicking a chip toggles that detector into / out of the detector
@@ -6385,6 +6420,9 @@ class HaInsightsPanel extends i {
       ${renderSelect("Area", this._availableAreas, this._filterAreas, (n) => (this._filterAreas = n), (id) => this._areaNameById[id] ?? id)}
       ${renderSelect("Floor", this._availableFloors, this._filterFloors, (n) => (this._filterFloors = n), (id) => this._floorNameById[id] ?? id)}
       ${renderSelect("Integration", this._availableIntegrations, this._filterIntegrations, (n) => (this._filterIntegrations = n))}
+      ${this._availableLabels.length > 0
+            ? renderSelect("Label", this._availableLabels, this._filterLabels, (n) => (this._filterLabels = n))
+            : A}
       ${renderSelect("Device class", this._availableDeviceClasses, this._filterDeviceClasses, (n) => (this._filterDeviceClasses = n))}
       ${renderSelect("Detector", this._availableDetectors, this._filterDetectors, (n) => (this._filterDetectors = n))}
     </div>`;
@@ -6465,6 +6503,9 @@ __decorate([
 ], HaInsightsPanel.prototype, "_filterIntegrations", void 0);
 __decorate([
     r()
+], HaInsightsPanel.prototype, "_filterLabels", void 0);
+__decorate([
+    r()
 ], HaInsightsPanel.prototype, "_auditDepth", void 0);
 __decorate([
     r()
@@ -6490,6 +6531,9 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_availableIntegrations", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_availableLabels", void 0);
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_areaNameById", void 0);

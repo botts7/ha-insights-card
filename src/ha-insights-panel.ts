@@ -13,7 +13,7 @@
  *     config={"_panel_custom": {"name": "ha-insights-panel", ...}},
  *   )
  */
-import { LitElement, html, css, type TemplateResult } from "lit";
+import { LitElement, html, css, nothing, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
 import "./ha-insights-card";
@@ -34,6 +34,7 @@ export class HaInsightsPanel extends LitElement {
     | "floor"
     | "integration"
     | "detector"
+    | "label"
     | "none" = "none";
   @state() private _backfillBusy = false;
   @state() private _bulkBusy = false;
@@ -70,6 +71,10 @@ export class HaInsightsPanel extends LitElement {
   // v1.2 Phase 5: floor + integration axes alongside domain/area/dc/detector.
   @state() private _filterFloors: string[] = [];
   @state() private _filterIntegrations: string[] = [];
+  // v1.5.28: labels (HA 2024.4+) — user-applied tags that cascade
+  // from entity → device → area. A user with `label: outdoor`,
+  // `label: critical`, etc. can slice insights by their own taxonomy.
+  @state() private _filterLabels: string[] = [];
   // v1.2.1: depth of LLM reasoning for 🤖 Suggest. "concise" is the
   // cheap default (~150 token rules); "indepth" sends a fuller
   // protocol (~600 token rules) for tricky cases. Persists across
@@ -89,6 +94,8 @@ export class HaInsightsPanel extends LitElement {
   // v1.2 Phase 5
   @state() private _availableFloors: string[] = [];
   @state() private _availableIntegrations: string[] = [];
+  // v1.5.28: distinct labels across the loaded insight set.
+  @state() private _availableLabels: string[] = [];
   // Area-id ↔ display-name maps populated from the loaded insight set
   // so chip dropdowns and the per-detector header show friendly labels
   // ("Living Room") instead of opaque registry ids.
@@ -489,6 +496,19 @@ export class HaInsightsPanel extends LitElement {
         insights.map((i) => i.integration).filter((v): v is string => !!v),
       ),
     ].sort();
+    // v1.5.28: distinct labels across insights. Each insight can
+    // carry multiple labels (entity + device + area cascade); flatten
+    // into a single set.
+    this._availableLabels = [
+      ...new Set(
+        insights.flatMap(
+          (i) =>
+            Array.isArray((i as { labels?: unknown }).labels)
+              ? ((i as { labels: string[] }).labels)
+              : [],
+        ),
+      ),
+    ].sort();
     // Build id → friendly-name lookups from the loaded list. The card
     // already carries area_name + floor_name on each row when set;
     // collecting them here keeps chip labels readable.
@@ -564,7 +584,8 @@ export class HaInsightsPanel extends LitElement {
         saved.groupBy === "detector" ||
         saved.groupBy === "area" ||
         saved.groupBy === "floor" ||
-        saved.groupBy === "integration"
+        saved.groupBy === "integration" ||
+        saved.groupBy === "label"
       ) {
         this._groupBy = saved.groupBy;
       }
@@ -599,6 +620,12 @@ export class HaInsightsPanel extends LitElement {
           (s: unknown): s is string => typeof s === "string",
         );
       }
+      // v1.5.28: load labels chip filter from localStorage
+      if (Array.isArray(saved.filterLabels)) {
+        this._filterLabels = saved.filterLabels.filter(
+          (s: unknown): s is string => typeof s === "string",
+        );
+      }
       if (saved.auditDepth === "concise" || saved.auditDepth === "indepth") {
         this._auditDepth = saved.auditDepth;
       }
@@ -624,6 +651,7 @@ export class HaInsightsPanel extends LitElement {
           filterDetectors: this._filterDetectors,
           filterFloors: this._filterFloors,
           filterIntegrations: this._filterIntegrations,
+          filterLabels: this._filterLabels,
           auditDepth: this._auditDepth,
         }),
       );
@@ -652,6 +680,7 @@ export class HaInsightsPanel extends LitElement {
       `${this._filterDomains.join(",")}|${this._filterAreas.join(",")}|` +
       `${this._filterDeviceClasses.join(",")}|${this._filterDetectors.join(",")}|` +
       `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}|` +
+      `${this._filterLabels.join(",")}|` +
       `${this._auditDepth}`;
     if (this._cachedCardConfigKey !== key) {
       this._cachedCardConfigKey = key;
@@ -673,6 +702,7 @@ export class HaInsightsPanel extends LitElement {
         detector_filter: this._filterDetectors,
         floor_filter: this._filterFloors,
         integration_filter: this._filterIntegrations,
+        label_filter: this._filterLabels,
         audit_depth: this._auditDepth,
       };
     }
@@ -1291,6 +1321,7 @@ export class HaInsightsPanel extends LitElement {
           <option value="area">Group: Area</option>
           <option value="floor">Group: Floor</option>
           <option value="integration">Group: Integration</option>
+          <option value="label">Group: Label</option>
         </select>
         <select
           aria-label="Audit suggest analysis depth"
@@ -1337,7 +1368,8 @@ export class HaInsightsPanel extends LitElement {
       this._filterDeviceClasses.length > 0 ||
       this._filterDetectors.length > 0 ||
       this._filterFloors.length > 0 ||
-      this._filterIntegrations.length > 0
+      this._filterIntegrations.length > 0 ||
+      this._filterLabels.length > 0
     );
   }
 
@@ -1348,6 +1380,7 @@ export class HaInsightsPanel extends LitElement {
     this._filterDetectors = [];
     this._filterFloors = [];
     this._filterIntegrations = [];
+    this._filterLabels = [];
   }
 
   /** A row of small chips listing each detector and its insight count.
@@ -1551,6 +1584,14 @@ export class HaInsightsPanel extends LitElement {
         this._filterIntegrations,
         (n) => (this._filterIntegrations = n),
       )}
+      ${this._availableLabels.length > 0
+        ? renderSelect(
+            "Label",
+            this._availableLabels,
+            this._filterLabels,
+            (n) => (this._filterLabels = n),
+          )
+        : nothing}
       ${renderSelect(
         "Device class",
         this._availableDeviceClasses,

@@ -95,6 +95,11 @@ export interface Insight {
   floor_id?: string | null;
   floor_name?: string | null;
   integration?: string | null;
+  /** v1.5.28: HA 2024.4+ labels attached to the insight's primary
+   *  entity (or its device / area, since labels cascade in HA). Sorted
+   *  for stable group_by ordering. Empty array when the entity has no
+   *  labels OR the registry doesn't have the labels module. */
+  labels?: string[];
 }
 
 export interface AutomationLink {
@@ -236,7 +241,7 @@ export interface CardConfig {
   sort_by?: "confidence" | "age" | "detector";
   /** v0.7: render insights grouped under section headers.
    *  v1.2 Phase 5 adds floor and integration. */
-  group_by?: "area" | "floor" | "integration" | "detector" | "none";
+  group_by?: "area" | "floor" | "integration" | "detector" | "label" | "none";
   /** v0.8: include already-applied insights in the list (so Undo is reachable). */
   include_applied?: boolean;
   /** v1.1: panel-only filter chips. Each is a list of selected values;
@@ -252,6 +257,9 @@ export interface CardConfig {
    * shape as the others — empty / undefined means "no filter". */
   floor_filter?: string[];
   integration_filter?: string[];
+  /** v1.5.28: filter by HA 2024.4+ label slug. Same shape as the
+   *  others — empty / undefined means "no filter". */
+  label_filter?: string[];
   /** v1.2.1: override the integration's audit_analysis_depth setting
    *  for 🤖 Suggest calls fired from this card. Undefined = inherit
    *  the OptionsFlow value (defaults to "concise"). */

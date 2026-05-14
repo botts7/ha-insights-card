@@ -2415,6 +2415,7 @@ export class HaInsightsCard extends LitElement {
     const detSet = new Set(this._config.detector_filter ?? []);
     const floorSet = new Set(this._config.floor_filter ?? []);
     const integSet = new Set(this._config.integration_filter ?? []);
+    const labelSet = new Set(this._config.label_filter ?? []);
     const filtered = this._insights
       .filter((i) => i.confidence >= min)
       .filter((i) => !search || i.title.toLowerCase().includes(search))
@@ -2437,6 +2438,11 @@ export class HaInsightsCard extends LitElement {
         (i) =>
           integSet.size === 0 ||
           (i.integration != null && integSet.has(i.integration)),
+      )
+      .filter(
+        (i) =>
+          labelSet.size === 0 ||
+          (Array.isArray(i.labels) && i.labels.some((l) => labelSet.has(l))),
       );
 
     filtered.sort((a, b) => {
@@ -2595,9 +2601,13 @@ export class HaInsightsCard extends LitElement {
             ? row.floor_name ?? row.floor_id ?? "(no floor)"
             : key === "integration"
               ? row.integration ?? "(no integration)"
-              : key === "detector"
-                ? row.detector
-                : "";
+              : key === "label"
+                ? (Array.isArray(row.labels) && row.labels.length > 0
+                    ? row.labels[0]
+                    : "(no label)")
+                : key === "detector"
+                  ? row.detector
+                  : "";
       const existing = buckets.get(groupKey);
       if (existing) existing.push(row);
       else buckets.set(groupKey, [row]);
