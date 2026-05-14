@@ -237,6 +237,12 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
          *  so the first-load picture is "things you haven't classified yet". */
         this._showAll = false;
         this._filter = "";
+        /** v1.2.7 — Structured filters in addition to free-text search.
+         *  Empty string = "all". Populated from the actual data on fetch
+         *  so users only see options they have. */
+        this._filterIntegration = "";
+        this._filterManufacturer = "";
+        this._filterDomain = ""; // entities tab only
         this._onClose = () => {
             if (this._saving)
                 return; // don't close mid-save
@@ -307,10 +313,49 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
             return "";
         return this._areas.find((a) => a.area_id === area_id)?.name ?? area_id;
     }
+    /** v1.2.7 — Available filter values, derived from the loaded data
+     *  so users only see options that exist in their install.
+     *  Sorted alphabetically. Empty strings filtered out. */
+    _availableIntegrations() {
+        const set = new Set();
+        if (this._tab === "devices") {
+            for (const d of this._devices) {
+                d.config_entries?.[0];
+                // Manufacturer is a more reliable signal at device level.
+            }
+        }
+        else {
+            for (const e of this._entities) {
+                if (e.platform)
+                    set.add(e.platform);
+            }
+        }
+        return [...set].sort();
+    }
+    _availableManufacturers() {
+        const set = new Set();
+        for (const d of this._devices) {
+            if (d.manufacturer)
+                set.add(d.manufacturer);
+        }
+        return [...set].sort();
+    }
+    _availableDomains() {
+        const set = new Set();
+        for (const e of this._entities) {
+            const dot = e.entity_id.indexOf(".");
+            if (dot > 0)
+                set.add(e.entity_id.slice(0, dot));
+        }
+        return [...set].sort();
+    }
     _filteredDevices() {
         const f = this._filter.trim().toLowerCase();
+        const fMfr = this._filterManufacturer;
         return this._devices.filter((d) => {
             if (!this._showAll && d.area_id)
+                return false;
+            if (fMfr && d.manufacturer !== fMfr)
                 return false;
             if (!f)
                 return true;
@@ -321,6 +366,8 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
     }
     _filteredEntities() {
         const f = this._filter.trim().toLowerCase();
+        const fInt = this._filterIntegration;
+        const fDom = this._filterDomain;
         return this._entities.filter((e) => {
             // Skip entities whose device already has an area (cascade
             // handles them). User can flip Show All to override.
@@ -332,6 +379,14 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
                     if (dev?.area_id)
                         return false;
                 }
+            }
+            if (fInt && e.platform !== fInt)
+                return false;
+            if (fDom) {
+                const dot = e.entity_id.indexOf(".");
+                const dom = dot > 0 ? e.entity_id.slice(0, dot) : "";
+                if (dom !== fDom)
+                    return false;
             }
             if (!f)
                 return true;
@@ -558,10 +613,39 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
               <div class="filters">
                 <input
                   type="search"
-                  placeholder="Filter…"
+                  placeholder="Filter by name…"
                   .value=${this._filter}
                   @input=${(e) => (this._filter = e.target.value)}
                 />
+                ${this._tab === "devices"
+            ? b `
+                      <select
+                        class="filter-select"
+                        .value=${this._filterManufacturer}
+                        @change=${(e) => (this._filterManufacturer = e.target.value)}
+                      >
+                        <option value="">All manufacturers</option>
+                        ${this._availableManufacturers().map((m) => b `<option value=${m}>${m}</option>`)}
+                      </select>
+                    `
+            : b `
+                      <select
+                        class="filter-select"
+                        .value=${this._filterIntegration}
+                        @change=${(e) => (this._filterIntegration = e.target.value)}
+                      >
+                        <option value="">All integrations</option>
+                        ${this._availableIntegrations().map((i) => b `<option value=${i}>${i}</option>`)}
+                      </select>
+                      <select
+                        class="filter-select"
+                        .value=${this._filterDomain}
+                        @change=${(e) => (this._filterDomain = e.target.value)}
+                      >
+                        <option value="">All types</option>
+                        ${this._availableDomains().map((d) => b `<option value=${d}>${d}</option>`)}
+                      </select>
+                    `}
                 <label class="show-all">
                   <input
                     type="checkbox"
@@ -696,6 +780,14 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
       background: var(--card-background-color, #fff);
       color: var(--primary-text-color);
       min-width: 180px;
+    }
+    .filter-select {
+      padding: 6px 10px;
+      border-radius: 4px;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      background: var(--card-background-color, #fff);
+      color: var(--primary-text-color);
+      min-width: 130px;
     }
     .show-all {
       font-size: 0.9em;
@@ -853,6 +945,15 @@ __decorate([
 __decorate([
     r()
 ], BulkAreaAssignDialog.prototype, "_filter", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_filterIntegration", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_filterManufacturer", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_filterDomain", void 0);
 BulkAreaAssignDialog = __decorate([
     t("bulk-area-assign-dialog")
 ], BulkAreaAssignDialog);

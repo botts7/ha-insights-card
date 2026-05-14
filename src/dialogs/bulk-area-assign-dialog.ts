@@ -84,6 +84,12 @@ export class BulkAreaAssignDialog extends LitElement {
    *  so the first-load picture is "things you haven't classified yet". */
   @state() private _showAll = false;
   @state() private _filter = "";
+  /** v1.2.7 — Structured filters in addition to free-text search.
+   *  Empty string = "all". Populated from the actual data on fetch
+   *  so users only see options they have. */
+  @state() private _filterIntegration = "";
+  @state() private _filterManufacturer = "";
+  @state() private _filterDomain = ""; // entities tab only
 
   updated(changedProps: Map<string, unknown>): void {
     // Lazy-fetch when the dialog transitions to open.
@@ -151,10 +157,50 @@ export class BulkAreaAssignDialog extends LitElement {
     return this._areas.find((a) => a.area_id === area_id)?.name ?? area_id;
   }
 
+  /** v1.2.7 — Available filter values, derived from the loaded data
+   *  so users only see options that exist in their install.
+   *  Sorted alphabetically. Empty strings filtered out. */
+  private _availableIntegrations(): string[] {
+    const set = new Set<string>();
+    if (this._tab === "devices") {
+      for (const d of this._devices) {
+        const ce = d.config_entries?.[0];
+        if (ce) {
+          // The integration domain isn't directly on the device entry;
+          // we use config_entries[0] as a proxy. For per-entity tab
+          // we have a more direct `platform` field.
+        }
+        // Manufacturer is a more reliable signal at device level.
+      }
+    } else {
+      for (const e of this._entities) {
+        if (e.platform) set.add(e.platform);
+      }
+    }
+    return [...set].sort();
+  }
+  private _availableManufacturers(): string[] {
+    const set = new Set<string>();
+    for (const d of this._devices) {
+      if (d.manufacturer) set.add(d.manufacturer);
+    }
+    return [...set].sort();
+  }
+  private _availableDomains(): string[] {
+    const set = new Set<string>();
+    for (const e of this._entities) {
+      const dot = e.entity_id.indexOf(".");
+      if (dot > 0) set.add(e.entity_id.slice(0, dot));
+    }
+    return [...set].sort();
+  }
+
   private _filteredDevices(): DeviceRegistryEntry[] {
     const f = this._filter.trim().toLowerCase();
+    const fMfr = this._filterManufacturer;
     return this._devices.filter((d) => {
       if (!this._showAll && d.area_id) return false;
+      if (fMfr && d.manufacturer !== fMfr) return false;
       if (!f) return true;
       const hay =
         (this._deviceLabel(d) + " " + (d.manufacturer ?? "") + " " +
@@ -164,6 +210,8 @@ export class BulkAreaAssignDialog extends LitElement {
   }
   private _filteredEntities(): EntityRegistryEntry[] {
     const f = this._filter.trim().toLowerCase();
+    const fInt = this._filterIntegration;
+    const fDom = this._filterDomain;
     return this._entities.filter((e) => {
       // Skip entities whose device already has an area (cascade
       // handles them). User can flip Show All to override.
@@ -173,6 +221,12 @@ export class BulkAreaAssignDialog extends LitElement {
           const dev = this._devices.find((d) => d.id === e.device_id);
           if (dev?.area_id) return false;
         }
+      }
+      if (fInt && e.platform !== fInt) return false;
+      if (fDom) {
+        const dot = e.entity_id.indexOf(".");
+        const dom = dot > 0 ? e.entity_id.slice(0, dot) : "";
+        if (dom !== fDom) return false;
       }
       if (!f) return true;
       return e.entity_id.toLowerCase().includes(f) ||
@@ -420,11 +474,55 @@ export class BulkAreaAssignDialog extends LitElement {
               <div class="filters">
                 <input
                   type="search"
-                  placeholder="Filter…"
+                  placeholder="Filter by name…"
                   .value=${this._filter}
                   @input=${(e: Event) =>
                     (this._filter = (e.target as HTMLInputElement).value)}
                 />
+                ${this._tab === "devices"
+                  ? html`
+                      <select
+                        class="filter-select"
+                        .value=${this._filterManufacturer}
+                        @change=${(e: Event) =>
+                          (this._filterManufacturer = (
+                            e.target as HTMLSelectElement
+                          ).value)}
+                      >
+                        <option value="">All manufacturers</option>
+                        ${this._availableManufacturers().map(
+                          (m) => html`<option value=${m}>${m}</option>`,
+                        )}
+                      </select>
+                    `
+                  : html`
+                      <select
+                        class="filter-select"
+                        .value=${this._filterIntegration}
+                        @change=${(e: Event) =>
+                          (this._filterIntegration = (
+                            e.target as HTMLSelectElement
+                          ).value)}
+                      >
+                        <option value="">All integrations</option>
+                        ${this._availableIntegrations().map(
+                          (i) => html`<option value=${i}>${i}</option>`,
+                        )}
+                      </select>
+                      <select
+                        class="filter-select"
+                        .value=${this._filterDomain}
+                        @change=${(e: Event) =>
+                          (this._filterDomain = (
+                            e.target as HTMLSelectElement
+                          ).value)}
+                      >
+                        <option value="">All types</option>
+                        ${this._availableDomains().map(
+                          (d) => html`<option value=${d}>${d}</option>`,
+                        )}
+                      </select>
+                    `}
                 <label class="show-all">
                   <input
                     type="checkbox"
@@ -563,6 +661,14 @@ export class BulkAreaAssignDialog extends LitElement {
       background: var(--card-background-color, #fff);
       color: var(--primary-text-color);
       min-width: 180px;
+    }
+    .filter-select {
+      padding: 6px 10px;
+      border-radius: 4px;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      background: var(--card-background-color, #fff);
+      color: var(--primary-text-color);
+      min-width: 130px;
     }
     .show-all {
       font-size: 0.9em;
