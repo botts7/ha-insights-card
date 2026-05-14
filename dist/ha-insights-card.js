@@ -965,7 +965,15 @@ class HaInsightsCard extends i {
         super(...arguments);
         this._config = { type: "custom:ha-insights-card" };
         this._insights = [];
-        this._loading = true;
+        // v1.2.9: `_loading` removed. It was a lifecycle flag that could
+        // get stuck (WS hang, missed update, etc.) and produced a blank
+        // "Loading…" curtain — the worst kind of UX failure (you don't
+        // know if it's broken or just slow). The card now renders based
+        // on the data it actually has: insights, _hello (server contact),
+        // _error (visible failure). Empty data + no error = empty state
+        // with a "Run scan now" CTA, not a stuck curtain. Mirrors how
+        // every native HA panel handles this — they never show "Loading…"
+        // as a terminal state, only as a transient indicator at most.
         // True while a scan is in flight — render method shows a "Scanning…"
         // curtain instead of the live-mutating insight list. Cleared by the
         // ha-insights-refresh handler (which also fetches the canonical
@@ -1027,61 +1035,75 @@ class HaInsightsCard extends i {
         // reports the true number of insights even when the cap clips the
         // rendered list to e.g. 1 row.
         this._totalFilteredCount = 0;
-        this._wired = false;
         this._keydownHandler = (e) => {
             if (e.key === "Escape" && this._dialogId) {
                 this._closeDialog();
             }
         };
-        /** v1.2.2 — Cleanup hooks for the visibility-resume listener.
-         *  Single listener; on document becoming visible we re-fetch via
-         *  the same path the panel's Scan/Purge/Backfill flows use.
-         *
-         *  Why this is enough: home-assistant-js-websocket's `Connection`
-         *  already auto-reconnects on socket drop AND auto-resubscribes
-         *  every `subscribeMessage` handle across reconnects. So our
-         *  subscription stays live — the only thing we need to handle is
-         *  refreshing the LIST after a long background period (in case
-         *  events were emitted while the tab was paused and the cache is
-         *  stale). HA's own panels follow the same pattern. */
-        this._resumeCleanups = [];
         this._scanStarted = () => {
             this._scanInProgress = true;
         };
         this._refreshFromEvent = async () => {
+            // v1.2.9: no more _loading flag to manage. Render is data-driven
+            // (insights / _hello / _error); this method just updates the
+            // underlying data, render handles the rest. `_scanInProgress`
+            // stays because it's a legitimate transient indicator a scan is
+            // running RIGHT NOW (user clicked Run scan, results coming).
             if (!this.hass) {
                 this._scanInProgress = false;
                 return;
             }
             // Refresh hello in parallel so the footer + protocol-skew banner
-            // reflect the latest deploy (otherwise the card holds onto the
-            // version it saw at first mount until a manual page reload).
+            // reflect the latest deploy. Non-fatal — list-refresh is the
+            // user-visible bit.
             try {
-                const hello = await this.hass.connection.sendMessagePromise({
+                this._hello = await this._withTimeout(this.hass.connection.sendMessagePromise({
                     type: "home_insights/hello",
                     card_version: "0.8.2",
-                });
-                this._hello = hello;
+                }), "home_insights/hello");
             }
             catch (err) {
-                // Non-fatal — list-refresh is the user-visible bit
                 console.debug("ha-insights-card hello refresh failed", err);
             }
+            // List is the load-bearing call. If it fails AND we have no
+            // existing insights to fall back to, surface the error so the
+            // user knows the card is alive and explains itself. If we DO
+            // have prior insights, keep them visible — stale is better than
+            // blank.
             try {
-                const result = await this.hass.connection.sendMessagePromise({
+                const result = await this._withTimeout(this.hass.connection.sendMessagePromise({
                     type: "home_insights/list",
                     include_applied: Boolean(this._config.include_applied),
-                });
+                }), "home_insights/list");
                 this._insights = result.insights ?? [];
+                this._error = undefined;
             }
             catch (err) {
                 console.warn("ha-insights-card refresh-from-event failed", err);
+                if (this._insights.length === 0) {
+                    this._error = `Could not refresh insights: ${this._asMessage(err)}`;
+                }
             }
             finally {
                 this._scanInProgress = false;
             }
         };
     }
+    // v1.2.9: `_wired` removed. Used to gate the initial fetch, but
+    // it was also a "we've talked to HA" signal we tracked manually —
+    // which can drift from reality (subscription died but flag still
+    // says wired). Replaced by checking `this._hello` directly: the
+    // hello-response object IS the signal that we successfully talked
+    // to the integration. If hello is undefined, we haven't fetched
+    // yet; if it's set, we have. Single source of truth, can't drift.
+    //
+    // `_resumeCleanups` + `_installResumeHandlers` removed. HA's
+    // home-assistant-js-websocket auto-reconnects on WS drop and
+    // auto-resubscribes subscribeMessage handles. The visibility-
+    // change handler we added in v1.2.2 was working around a problem
+    // that only appeared because our `_loading` flag could stick —
+    // with `_loading` gone, there's no stuck state to recover from.
+    // Subscription events flow back in naturally on WS resume.
     static { this.styles = i$3 `
     :host {
       display: block;
@@ -2054,45 +2076,24 @@ class HaInsightsCard extends i {
             }
         });
         this._resizeObserver.observe(this);
-        this._installResumeHandlers();
+        // v1.2.9: visibility-resume handler removed. HA's WS library
+        // auto-reconnects + auto-resubscribes on backgrounding. With the
+        // _loading flag gone (also v1.2.9), there's no stuck state for
+        // tab-return to recover from. The subscription naturally delivers
+        // any events that fired during the pause when it resumes.
     }
-    /** v1.2.2 — Re-wire on tab-return AND on HA WebSocket reconnect.
-     *
-     * Without this, the card subscribes once on first mount (gated by
-     * `_wired`) and never re-establishes. When the tab is backgrounded
-     * long enough for HA's frontend to drop its WebSocket, the
-     * `_unsub` handle points at a dead subscription. On return:
-     *   - no new insights stream in
-     *   - the existing list is stale
-     *   - users hit page-refresh to recover
-     *
-     * Handlers:
-     *   1. document.visibilitychange (becoming visible) → refresh list
-     *      via the same path used after a scan completes. Cheap if the
-     *      WS is still alive; recovers state if it isn't.
-     *   2. hass.connection.addEventListener("disconnected") → record
-     *      the drop so we know to re-wire on the next "ready".
-     *   3. hass.connection.addEventListener("ready") → if we saw a
-     *      disconnect since the last wire, reset the subscription and
-     *      re-run _wire() to re-fetch + re-subscribe.
-     *
-     * All listeners are torn down in disconnectedCallback. */
-    _installResumeHandlers() {
-        const onVisibility = () => {
-            if (document.visibilityState !== "visible")
-                return;
-            if (!this.hass)
-                return;
-            // Cheap path — same code-path the panel's Scan/Purge/Backfill
-            // flow uses. Refreshes hello + list. If the WS dropped while
-            // the tab was backgrounded, home-assistant-js-websocket has
-            // already reconnected by the time visibilitychange fires (or
-            // is about to), and its built-in resubscribe handles the
-            // subscribeMessage handle — we don't need to re-wire that.
-            void this._refreshFromEvent();
-        };
-        document.addEventListener("visibilitychange", onVisibility);
-        this._resumeCleanups.push(() => document.removeEventListener("visibilitychange", onVisibility));
+    /** v1.2.8 — timeout-wrap a WS promise so an unrecoverably-hanging
+     *  call (post-tab-pause, connection in limbo) can't block the UI
+     *  forever. Rejects with a typed error after `timeoutMs` so callers
+     *  can show the user a real failure instead of "Loading…" forever.
+     *  8s default — generous for a healthy WS, tight enough that users
+     *  notice failures within their attention span. */
+    static { this._WS_TIMEOUT_MS = 8_000; }
+    _withTimeout(promise, label, timeoutMs = HaInsightsCard._WS_TIMEOUT_MS) {
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => window.setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)),
+        ]);
     }
     /** Approximate per-row height — title + meta + padding + border. */
     static { this.ROW_HEIGHT_PX = 72; }
@@ -2106,8 +2107,11 @@ class HaInsightsCard extends i {
         }
     }
     updated(changedProps) {
-        if (changedProps.has("hass") && this.hass && !this._wired) {
-            this._wired = true;
+        // v1.2.9: trigger initial fetch when hass first arrives. The
+        // gate is `!this._hello` — if hello is undefined we haven't
+        // successfully talked to the integration yet. Single source of
+        // truth: hello-response IS the "we're connected" signal.
+        if (changedProps.has("hass") && this.hass && !this._hello) {
             void this._wire();
         }
         if (changedProps.has("_toast") && this._toast) {
@@ -2137,50 +2141,60 @@ class HaInsightsCard extends i {
         window.removeEventListener("keydown", this._keydownHandler);
         window.removeEventListener("ha-insights-scan-start", this._scanStarted);
         window.removeEventListener("ha-insights-refresh", this._refreshFromEvent);
-        // v1.2.2 — tear down the visibility-resume listener.
-        for (const cleanup of this._resumeCleanups)
-            cleanup();
-        this._resumeCleanups = [];
+        // v1.2.9: resume-listener cleanup removed alongside the
+        // visibility handler. Nothing to tear down besides the standard
+        // subscribe handle + resize observer.
         document.body.style.overflow = "";
         this._unsub?.();
         this._unsub = undefined;
-        this._wired = false;
+        // Clear `_hello` so a fresh element instance after a re-mount
+        // (HA panel navigation cycle) treats itself as un-fetched and
+        // re-runs the initial fetch via updated().
+        this._hello = undefined;
         this._resizeObserver?.disconnect();
         this._resizeObserver = undefined;
     }
     async _wire() {
         if (!this.hass)
             return;
+        // v1.2.8: every WS call gets a timeout. If the call hangs (post-
+        // tab-resume, WS-reconnect-in-flight, slow integration startup),
+        // we surface a real error after 8s instead of sitting on
+        // "Loading…" forever.
+        // v1.2.9: no _loading flag to clear. Failures set _error which
+        // render() shows as a banner; subsequent retries clear _error
+        // on success. The card always renders SOMETHING useful — never
+        // a stuck curtain.
         try {
-            this._hello = await this.hass.connection.sendMessagePromise({
+            this._hello = await this._withTimeout(this.hass.connection.sendMessagePromise({
                 type: "home_insights/hello",
                 card_version: "0.8.2",
-            });
+            }), "home_insights/hello");
         }
         catch (err) {
             this._error = `Integration not reachable: ${this._asMessage(err)}`;
-            this._loading = false;
             return;
         }
         try {
-            const result = await this.hass.connection.sendMessagePromise({
+            const result = await this._withTimeout(this.hass.connection.sendMessagePromise({
                 type: "home_insights/list",
                 include_applied: Boolean(this._config.include_applied),
-            });
+            }), "home_insights/list");
             this._insights = result.insights ?? [];
+            this._error = undefined; // success clears any prior error
         }
         catch (err) {
             this._error = `Could not list insights: ${this._asMessage(err)}`;
-            this._loading = false;
             return;
         }
         try {
-            this._unsub = await this.hass.connection.subscribeMessage((event) => this._handleEvent(event), { type: "home_insights/subscribe" });
+            this._unsub = await this._withTimeout(this.hass.connection.subscribeMessage((event) => this._handleEvent(event), { type: "home_insights/subscribe" }), "home_insights/subscribe");
         }
         catch (err) {
             console.warn("ha-insights-card subscribe failed", err);
+            // Subscribe is non-fatal — we have list data; the user just
+            // won't see live updates until next refresh.
         }
-        this._loading = false;
     }
     _handleEvent(event) {
         // `purged` events carry no insight payload — server fires one when
@@ -4766,14 +4780,12 @@ class HaInsightsCard extends i {
     `;
     }
     render() {
-        if (this._loading) {
-            return b `
-        <ha-card>
-          ${this._renderHeader()}
-          <div class="empty">Loading…</div>
-        </ha-card>
-      `;
-        }
+        // v1.2.9: no "Loading…" curtain. The card renders based on data
+        // it actually has — insights (the real payload), _hello (server
+        // contact), _error (visible failure), _scanInProgress (transient).
+        // Empty data + no contact yet = the normal empty state below
+        // with a Refresh CTA, NOT a stuck "Loading…" screen.
+        //
         // Scan-in-progress curtain. Hides the live-mutating subscribe stream
         // until the canonical post-scan ws_list lands via _refreshFromEvent.
         // Header stays visible so the user has context + can still click the
@@ -4887,9 +4899,6 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_modalError", void 0);
-__decorate([
-    r()
-], HaInsightsCard.prototype, "_loading", void 0);
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_scanInProgress", void 0);
