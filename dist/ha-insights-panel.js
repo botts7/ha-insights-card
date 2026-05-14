@@ -32,7 +32,7 @@ typeof SuppressedError === "function" ? SuppressedError : function (error, suppr
  * Copyright 2019 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
  */
-const t$1=globalThis,e$2=t$1.ShadowRoot&&(void 0===t$1.ShadyCSS||t$1.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,s$2=Symbol(),o$4=new WeakMap;let n$3 = class n{constructor(t,e,o){if(this._$cssResult$=true,o!==s$2)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=t,this.t=e;}get styleSheet(){let t=this.o;const s=this.t;if(e$2&&void 0===t){const e=void 0!==s&&1===s.length;e&&(t=o$4.get(s)),void 0===t&&((this.o=t=new CSSStyleSheet).replaceSync(this.cssText),e&&o$4.set(s,t));}return t}toString(){return this.cssText}};const r$4=t=>new n$3("string"==typeof t?t:t+"",void 0,s$2),i$3=(t,...e)=>{const o=1===t.length?t[0]:e.reduce((e,s,o)=>e+(t=>{if(true===t._$cssResult$)return t.cssText;if("number"==typeof t)return t;throw Error("Value passed to 'css' function must be a 'css' function result: "+t+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(s)+t[o+1],t[0]);return new n$3(o,t,s$2)},S$1=(s,o)=>{if(e$2)s.adoptedStyleSheets=o.map(t=>t instanceof CSSStyleSheet?t:t.styleSheet);else for(const e of o){const o=document.createElement("style"),n=t$1.litNonce;void 0!==n&&o.setAttribute("nonce",n),o.textContent=e.cssText,s.appendChild(o);}},c$2=e$2?t=>t:t=>t instanceof CSSStyleSheet?(t=>{let e="";for(const s of t.cssRules)e+=s.cssText;return r$4(e)})(t):t;
+const t$2=globalThis,e$2=t$2.ShadowRoot&&(void 0===t$2.ShadyCSS||t$2.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,s$2=Symbol(),o$4=new WeakMap;let n$3 = class n{constructor(t,e,o){if(this._$cssResult$=true,o!==s$2)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=t,this.t=e;}get styleSheet(){let t=this.o;const s=this.t;if(e$2&&void 0===t){const e=void 0!==s&&1===s.length;e&&(t=o$4.get(s)),void 0===t&&((this.o=t=new CSSStyleSheet).replaceSync(this.cssText),e&&o$4.set(s,t));}return t}toString(){return this.cssText}};const r$4=t=>new n$3("string"==typeof t?t:t+"",void 0,s$2),i$3=(t,...e)=>{const o=1===t.length?t[0]:e.reduce((e,s,o)=>e+(t=>{if(true===t._$cssResult$)return t.cssText;if("number"==typeof t)return t;throw Error("Value passed to 'css' function must be a 'css' function result: "+t+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(s)+t[o+1],t[0]);return new n$3(o,t,s$2)},S$1=(s,o)=>{if(e$2)s.adoptedStyleSheets=o.map(t=>t instanceof CSSStyleSheet?t:t.styleSheet);else for(const e of o){const o=document.createElement("style"),n=t$2.litNonce;void 0!==n&&o.setAttribute("nonce",n),o.textContent=e.cssText,s.appendChild(o);}},c$2=e$2?t=>t:t=>t instanceof CSSStyleSheet?(t=>{let e="";for(const s of t.cssRules)e+=s.cssText;return r$4(e)})(t):t;
 
 /**
  * @license
@@ -45,13 +45,20 @@ const t$1=globalThis,e$2=t$1.ShadowRoot&&(void 0===t$1.ShadyCSS||t$1.ShadyCSS.na
  * Copyright 2017 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
  */
-const t=globalThis,i$1=t=>t,s$1=t.trustedTypes,e=s$1?s$1.createPolicy("lit-html",{createHTML:t=>t}):void 0,h="$lit$",o$2=`lit$${Math.random().toFixed(9).slice(2)}$`,n$1="?"+o$2,r$2=`<${n$1}>`,l=document,c=()=>l.createComment(""),a=t=>null===t||"object"!=typeof t&&"function"!=typeof t,u=Array.isArray,d=t=>u(t)||"function"==typeof t?.[Symbol.iterator],f="[ \t\n\f\r]",v=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,_=/-->/g,m=/>/g,p=RegExp(`>|${f}(?:([^\\s"'>=/]+)(${f}*=${f}*(?:[^ \t\n\f\r"'\`<>=]|("|')|))|$)`,"g"),g=/'/g,$=/"/g,y=/^(?:script|style|textarea|title)$/i,x=t=>(i,...s)=>({_$litType$:t,strings:i,values:s}),b=x(1),E=Symbol.for("lit-noChange"),A=Symbol.for("lit-nothing"),C=new WeakMap,P=l.createTreeWalker(l,129);function V(t,i){if(!u(t)||!t.hasOwnProperty("raw"))throw Error("invalid template strings array");return void 0!==e?e.createHTML(i):i}const N=(t,i)=>{const s=t.length-1,e=[];let n,l=2===i?"<svg>":3===i?"<math>":"",c=v;for(let i=0;i<s;i++){const s=t[i];let a,u,d=-1,f=0;for(;f<s.length&&(c.lastIndex=f,u=c.exec(s),null!==u);)f=c.lastIndex,c===v?"!--"===u[1]?c=_:void 0!==u[1]?c=m:void 0!==u[2]?(y.test(u[2])&&(n=RegExp("</"+u[2],"g")),c=p):void 0!==u[3]&&(c=p):c===p?">"===u[0]?(c=n??v,d=-1):void 0===u[1]?d=-2:(d=c.lastIndex-u[2].length,a=u[1],c=void 0===u[3]?p:'"'===u[3]?$:g):c===$||c===g?c=p:c===_||c===m?c=v:(c=p,n=void 0);const x=c===p&&t[i+1].startsWith("/>")?" ":"";l+=c===v?s+r$2:d>=0?(e.push(a),s.slice(0,d)+h+s.slice(d)+o$2+x):s+o$2+(-2===d?i:x);}return [V(t,l+(t[s]||"<?>")+(2===i?"</svg>":3===i?"</math>":"")),e]};class S{constructor({strings:t,_$litType$:i},e){let r;this.parts=[];let l=0,a=0;const u=t.length-1,d=this.parts,[f,v]=N(t,i);if(this.el=S.createElement(f,e),P.currentNode=this.el.content,2===i||3===i){const t=this.el.content.firstChild;t.replaceWith(...t.childNodes);}for(;null!==(r=P.nextNode())&&d.length<u;){if(1===r.nodeType){if(r.hasAttributes())for(const t of r.getAttributeNames())if(t.endsWith(h)){const i=v[a++],s=r.getAttribute(t).split(o$2),e=/([.?@])?(.*)/.exec(i);d.push({type:1,index:l,name:e[2],strings:s,ctor:"."===e[1]?I:"?"===e[1]?L:"@"===e[1]?z:H}),r.removeAttribute(t);}else t.startsWith(o$2)&&(d.push({type:6,index:l}),r.removeAttribute(t));if(y.test(r.tagName)){const t=r.textContent.split(o$2),i=t.length-1;if(i>0){r.textContent=s$1?s$1.emptyScript:"";for(let s=0;s<i;s++)r.append(t[s],c()),P.nextNode(),d.push({type:2,index:++l});r.append(t[i],c());}}}else if(8===r.nodeType)if(r.data===n$1)d.push({type:2,index:l});else {let t=-1;for(;-1!==(t=r.data.indexOf(o$2,t+1));)d.push({type:7,index:l}),t+=o$2.length-1;}l++;}}static createElement(t,i){const s=l.createElement("template");return s.innerHTML=t,s}}function M(t,i,s=t,e){if(i===E)return i;let h=void 0!==e?s._$Co?.[e]:s._$Cl;const o=a(i)?void 0:i._$litDirective$;return h?.constructor!==o&&(h?._$AO?.(false),void 0===o?h=void 0:(h=new o(t),h._$AT(t,s,e)),void 0!==e?(s._$Co??=[])[e]=h:s._$Cl=h),void 0!==h&&(i=M(t,h._$AS(t,i.values),h,e)),i}class R{constructor(t,i){this._$AV=[],this._$AN=void 0,this._$AD=t,this._$AM=i;}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(t){const{el:{content:i},parts:s}=this._$AD,e=(t?.creationScope??l).importNode(i,true);P.currentNode=e;let h=P.nextNode(),o=0,n=0,r=s[0];for(;void 0!==r;){if(o===r.index){let i;2===r.type?i=new k(h,h.nextSibling,this,t):1===r.type?i=new r.ctor(h,r.name,r.strings,this,t):6===r.type&&(i=new Z(h,this,t)),this._$AV.push(i),r=s[++n];}o!==r?.index&&(h=P.nextNode(),o++);}return P.currentNode=l,e}p(t){let i=0;for(const s of this._$AV) void 0!==s&&(void 0!==s.strings?(s._$AI(t,s,i),i+=s.strings.length-2):s._$AI(t[i])),i++;}}class k{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(t,i,s,e){this.type=2,this._$AH=A,this._$AN=void 0,this._$AA=t,this._$AB=i,this._$AM=s,this.options=e,this._$Cv=e?.isConnected??true;}get parentNode(){let t=this._$AA.parentNode;const i=this._$AM;return void 0!==i&&11===t?.nodeType&&(t=i.parentNode),t}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(t,i=this){t=M(this,t,i),a(t)?t===A||null==t||""===t?(this._$AH!==A&&this._$AR(),this._$AH=A):t!==this._$AH&&t!==E&&this._(t):void 0!==t._$litType$?this.$(t):void 0!==t.nodeType?this.T(t):d(t)?this.k(t):this._(t);}O(t){return this._$AA.parentNode.insertBefore(t,this._$AB)}T(t){this._$AH!==t&&(this._$AR(),this._$AH=this.O(t));}_(t){this._$AH!==A&&a(this._$AH)?this._$AA.nextSibling.data=t:this.T(l.createTextNode(t)),this._$AH=t;}$(t){const{values:i,_$litType$:s}=t,e="number"==typeof s?this._$AC(t):(void 0===s.el&&(s.el=S.createElement(V(s.h,s.h[0]),this.options)),s);if(this._$AH?._$AD===e)this._$AH.p(i);else {const t=new R(e,this),s=t.u(this.options);t.p(i),this.T(s),this._$AH=t;}}_$AC(t){let i=C.get(t.strings);return void 0===i&&C.set(t.strings,i=new S(t)),i}k(t){u(this._$AH)||(this._$AH=[],this._$AR());const i=this._$AH;let s,e=0;for(const h of t)e===i.length?i.push(s=new k(this.O(c()),this.O(c()),this,this.options)):s=i[e],s._$AI(h),e++;e<i.length&&(this._$AR(s&&s._$AB.nextSibling,e),i.length=e);}_$AR(t=this._$AA.nextSibling,s){for(this._$AP?.(false,true,s);t!==this._$AB;){const s=i$1(t).nextSibling;i$1(t).remove(),t=s;}}setConnected(t){ void 0===this._$AM&&(this._$Cv=t,this._$AP?.(t));}}class H{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(t,i,s,e,h){this.type=1,this._$AH=A,this._$AN=void 0,this.element=t,this.name=i,this._$AM=e,this.options=h,s.length>2||""!==s[0]||""!==s[1]?(this._$AH=Array(s.length-1).fill(new String),this.strings=s):this._$AH=A;}_$AI(t,i=this,s,e){const h=this.strings;let o=false;if(void 0===h)t=M(this,t,i,0),o=!a(t)||t!==this._$AH&&t!==E,o&&(this._$AH=t);else {const e=t;let n,r;for(t=h[0],n=0;n<h.length-1;n++)r=M(this,e[s+n],i,n),r===E&&(r=this._$AH[n]),o||=!a(r)||r!==this._$AH[n],r===A?t=A:t!==A&&(t+=(r??"")+h[n+1]),this._$AH[n]=r;}o&&!e&&this.j(t);}j(t){t===A?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,t??"");}}class I extends H{constructor(){super(...arguments),this.type=3;}j(t){this.element[this.name]=t===A?void 0:t;}}class L extends H{constructor(){super(...arguments),this.type=4;}j(t){this.element.toggleAttribute(this.name,!!t&&t!==A);}}class z extends H{constructor(t,i,s,e,h){super(t,i,s,e,h),this.type=5;}_$AI(t,i=this){if((t=M(this,t,i,0)??A)===E)return;const s=this._$AH,e=t===A&&s!==A||t.capture!==s.capture||t.once!==s.once||t.passive!==s.passive,h=t!==A&&(s===A||e);e&&this.element.removeEventListener(this.name,this,s),h&&this.element.addEventListener(this.name,this,t),this._$AH=t;}handleEvent(t){"function"==typeof this._$AH?this._$AH.call(this.options?.host??this.element,t):this._$AH.handleEvent(t);}}class Z{constructor(t,i,s){this.element=t,this.type=6,this._$AN=void 0,this._$AM=i,this.options=s;}get _$AU(){return this._$AM._$AU}_$AI(t){M(this,t);}}const B=t.litHtmlPolyfillSupport;B?.(S,k),(t.litHtmlVersions??=[]).push("3.3.2");const D=(t,i,s)=>{const e=s?.renderBefore??i;let h=e._$litPart$;if(void 0===h){const t=s?.renderBefore??null;e._$litPart$=h=new k(i.insertBefore(c(),t),t,void 0,s??{});}return h._$AI(t),h};
+const t$1=globalThis,i$1=t=>t,s$1=t$1.trustedTypes,e=s$1?s$1.createPolicy("lit-html",{createHTML:t=>t}):void 0,h="$lit$",o$2=`lit$${Math.random().toFixed(9).slice(2)}$`,n$1="?"+o$2,r$2=`<${n$1}>`,l=document,c=()=>l.createComment(""),a=t=>null===t||"object"!=typeof t&&"function"!=typeof t,u=Array.isArray,d=t=>u(t)||"function"==typeof t?.[Symbol.iterator],f="[ \t\n\f\r]",v=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,_=/-->/g,m=/>/g,p=RegExp(`>|${f}(?:([^\\s"'>=/]+)(${f}*=${f}*(?:[^ \t\n\f\r"'\`<>=]|("|')|))|$)`,"g"),g=/'/g,$=/"/g,y=/^(?:script|style|textarea|title)$/i,x=t=>(i,...s)=>({_$litType$:t,strings:i,values:s}),b=x(1),E=Symbol.for("lit-noChange"),A=Symbol.for("lit-nothing"),C=new WeakMap,P=l.createTreeWalker(l,129);function V(t,i){if(!u(t)||!t.hasOwnProperty("raw"))throw Error("invalid template strings array");return void 0!==e?e.createHTML(i):i}const N=(t,i)=>{const s=t.length-1,e=[];let n,l=2===i?"<svg>":3===i?"<math>":"",c=v;for(let i=0;i<s;i++){const s=t[i];let a,u,d=-1,f=0;for(;f<s.length&&(c.lastIndex=f,u=c.exec(s),null!==u);)f=c.lastIndex,c===v?"!--"===u[1]?c=_:void 0!==u[1]?c=m:void 0!==u[2]?(y.test(u[2])&&(n=RegExp("</"+u[2],"g")),c=p):void 0!==u[3]&&(c=p):c===p?">"===u[0]?(c=n??v,d=-1):void 0===u[1]?d=-2:(d=c.lastIndex-u[2].length,a=u[1],c=void 0===u[3]?p:'"'===u[3]?$:g):c===$||c===g?c=p:c===_||c===m?c=v:(c=p,n=void 0);const x=c===p&&t[i+1].startsWith("/>")?" ":"";l+=c===v?s+r$2:d>=0?(e.push(a),s.slice(0,d)+h+s.slice(d)+o$2+x):s+o$2+(-2===d?i:x);}return [V(t,l+(t[s]||"<?>")+(2===i?"</svg>":3===i?"</math>":"")),e]};class S{constructor({strings:t,_$litType$:i},e){let r;this.parts=[];let l=0,a=0;const u=t.length-1,d=this.parts,[f,v]=N(t,i);if(this.el=S.createElement(f,e),P.currentNode=this.el.content,2===i||3===i){const t=this.el.content.firstChild;t.replaceWith(...t.childNodes);}for(;null!==(r=P.nextNode())&&d.length<u;){if(1===r.nodeType){if(r.hasAttributes())for(const t of r.getAttributeNames())if(t.endsWith(h)){const i=v[a++],s=r.getAttribute(t).split(o$2),e=/([.?@])?(.*)/.exec(i);d.push({type:1,index:l,name:e[2],strings:s,ctor:"."===e[1]?I:"?"===e[1]?L:"@"===e[1]?z:H}),r.removeAttribute(t);}else t.startsWith(o$2)&&(d.push({type:6,index:l}),r.removeAttribute(t));if(y.test(r.tagName)){const t=r.textContent.split(o$2),i=t.length-1;if(i>0){r.textContent=s$1?s$1.emptyScript:"";for(let s=0;s<i;s++)r.append(t[s],c()),P.nextNode(),d.push({type:2,index:++l});r.append(t[i],c());}}}else if(8===r.nodeType)if(r.data===n$1)d.push({type:2,index:l});else {let t=-1;for(;-1!==(t=r.data.indexOf(o$2,t+1));)d.push({type:7,index:l}),t+=o$2.length-1;}l++;}}static createElement(t,i){const s=l.createElement("template");return s.innerHTML=t,s}}function M(t,i,s=t,e){if(i===E)return i;let h=void 0!==e?s._$Co?.[e]:s._$Cl;const o=a(i)?void 0:i._$litDirective$;return h?.constructor!==o&&(h?._$AO?.(false),void 0===o?h=void 0:(h=new o(t),h._$AT(t,s,e)),void 0!==e?(s._$Co??=[])[e]=h:s._$Cl=h),void 0!==h&&(i=M(t,h._$AS(t,i.values),h,e)),i}class R{constructor(t,i){this._$AV=[],this._$AN=void 0,this._$AD=t,this._$AM=i;}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(t){const{el:{content:i},parts:s}=this._$AD,e=(t?.creationScope??l).importNode(i,true);P.currentNode=e;let h=P.nextNode(),o=0,n=0,r=s[0];for(;void 0!==r;){if(o===r.index){let i;2===r.type?i=new k(h,h.nextSibling,this,t):1===r.type?i=new r.ctor(h,r.name,r.strings,this,t):6===r.type&&(i=new Z(h,this,t)),this._$AV.push(i),r=s[++n];}o!==r?.index&&(h=P.nextNode(),o++);}return P.currentNode=l,e}p(t){let i=0;for(const s of this._$AV) void 0!==s&&(void 0!==s.strings?(s._$AI(t,s,i),i+=s.strings.length-2):s._$AI(t[i])),i++;}}class k{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(t,i,s,e){this.type=2,this._$AH=A,this._$AN=void 0,this._$AA=t,this._$AB=i,this._$AM=s,this.options=e,this._$Cv=e?.isConnected??true;}get parentNode(){let t=this._$AA.parentNode;const i=this._$AM;return void 0!==i&&11===t?.nodeType&&(t=i.parentNode),t}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(t,i=this){t=M(this,t,i),a(t)?t===A||null==t||""===t?(this._$AH!==A&&this._$AR(),this._$AH=A):t!==this._$AH&&t!==E&&this._(t):void 0!==t._$litType$?this.$(t):void 0!==t.nodeType?this.T(t):d(t)?this.k(t):this._(t);}O(t){return this._$AA.parentNode.insertBefore(t,this._$AB)}T(t){this._$AH!==t&&(this._$AR(),this._$AH=this.O(t));}_(t){this._$AH!==A&&a(this._$AH)?this._$AA.nextSibling.data=t:this.T(l.createTextNode(t)),this._$AH=t;}$(t){const{values:i,_$litType$:s}=t,e="number"==typeof s?this._$AC(t):(void 0===s.el&&(s.el=S.createElement(V(s.h,s.h[0]),this.options)),s);if(this._$AH?._$AD===e)this._$AH.p(i);else {const t=new R(e,this),s=t.u(this.options);t.p(i),this.T(s),this._$AH=t;}}_$AC(t){let i=C.get(t.strings);return void 0===i&&C.set(t.strings,i=new S(t)),i}k(t){u(this._$AH)||(this._$AH=[],this._$AR());const i=this._$AH;let s,e=0;for(const h of t)e===i.length?i.push(s=new k(this.O(c()),this.O(c()),this,this.options)):s=i[e],s._$AI(h),e++;e<i.length&&(this._$AR(s&&s._$AB.nextSibling,e),i.length=e);}_$AR(t=this._$AA.nextSibling,s){for(this._$AP?.(false,true,s);t!==this._$AB;){const s=i$1(t).nextSibling;i$1(t).remove(),t=s;}}setConnected(t){ void 0===this._$AM&&(this._$Cv=t,this._$AP?.(t));}}class H{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(t,i,s,e,h){this.type=1,this._$AH=A,this._$AN=void 0,this.element=t,this.name=i,this._$AM=e,this.options=h,s.length>2||""!==s[0]||""!==s[1]?(this._$AH=Array(s.length-1).fill(new String),this.strings=s):this._$AH=A;}_$AI(t,i=this,s,e){const h=this.strings;let o=false;if(void 0===h)t=M(this,t,i,0),o=!a(t)||t!==this._$AH&&t!==E,o&&(this._$AH=t);else {const e=t;let n,r;for(t=h[0],n=0;n<h.length-1;n++)r=M(this,e[s+n],i,n),r===E&&(r=this._$AH[n]),o||=!a(r)||r!==this._$AH[n],r===A?t=A:t!==A&&(t+=(r??"")+h[n+1]),this._$AH[n]=r;}o&&!e&&this.j(t);}j(t){t===A?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,t??"");}}class I extends H{constructor(){super(...arguments),this.type=3;}j(t){this.element[this.name]=t===A?void 0:t;}}class L extends H{constructor(){super(...arguments),this.type=4;}j(t){this.element.toggleAttribute(this.name,!!t&&t!==A);}}class z extends H{constructor(t,i,s,e,h){super(t,i,s,e,h),this.type=5;}_$AI(t,i=this){if((t=M(this,t,i,0)??A)===E)return;const s=this._$AH,e=t===A&&s!==A||t.capture!==s.capture||t.once!==s.once||t.passive!==s.passive,h=t!==A&&(s===A||e);e&&this.element.removeEventListener(this.name,this,s),h&&this.element.addEventListener(this.name,this,t),this._$AH=t;}handleEvent(t){"function"==typeof this._$AH?this._$AH.call(this.options?.host??this.element,t):this._$AH.handleEvent(t);}}class Z{constructor(t,i,s){this.element=t,this.type=6,this._$AN=void 0,this._$AM=i,this.options=s;}get _$AU(){return this._$AM._$AU}_$AI(t){M(this,t);}}const B=t$1.litHtmlPolyfillSupport;B?.(S,k),(t$1.litHtmlVersions??=[]).push("3.3.2");const D=(t,i,s)=>{const e=s?.renderBefore??i;let h=e._$litPart$;if(void 0===h){const t=s?.renderBefore??null;e._$litPart$=h=new k(i.insertBefore(c(),t),t,void 0,s??{});}return h._$AI(t),h};
 
 /**
  * @license
  * Copyright 2017 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
  */const s=globalThis;class i extends y$1{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0;}createRenderRoot(){const t=super.createRenderRoot();return this.renderOptions.renderBefore??=t.firstChild,t}update(t){const r=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(t),this._$Do=D(r,this.renderRoot,this.renderOptions);}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(true);}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(false);}render(){return E}}i._$litElement$=true,i["finalized"]=true,s.litElementHydrateSupport?.({LitElement:i});const o$1=s.litElementPolyfillSupport;o$1?.({LitElement:i});(s.litElementVersions??=[]).push("4.2.2");
+
+/**
+ * @license
+ * Copyright 2017 Google LLC
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+const t=t=>(e,o)=>{ void 0!==o?o.addInitializer(()=>{customElements.define(t,e);}):customElements.define(t,e);};
 
 /**
  * @license
@@ -211,6 +218,645 @@ if (!customElements.get("ha-insights-card-editor")) {
     customElements.define("ha-insights-card-editor", HaInsightsCardEditor);
 }
 
+let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
+    constructor() {
+        super(...arguments);
+        this.open = false;
+        this._tab = "devices";
+        this._areas = [];
+        this._devices = [];
+        this._entities = [];
+        /** Map keyed by `device:ID` or `entity:ID` → chosen area_id (or ""
+         *  for "clear area"). Empty means no pending change for that row. */
+        this._pending = new Map();
+        this._loading = false;
+        this._saving = false;
+        this._savedCount = 0;
+        this._failedRows = [];
+        /** When true, includes rows that already have an area. Default off
+         *  so the first-load picture is "things you haven't classified yet". */
+        this._showAll = false;
+        this._filter = "";
+        this._onClose = () => {
+            if (this._saving)
+                return; // don't close mid-save
+            this.open = false;
+            this.dispatchEvent(new CustomEvent("closed", { bubbles: true, composed: true }));
+        };
+    }
+    updated(changedProps) {
+        // Lazy-fetch when the dialog transitions to open.
+        if (changedProps.has("open") && this.open && this.hass) {
+            void this._fetchRegistries();
+        }
+    }
+    async _fetchRegistries() {
+        if (!this.hass)
+            return;
+        this._loading = true;
+        this._error = undefined;
+        this._pending = new Map();
+        this._savedCount = 0;
+        this._failedRows = [];
+        try {
+            const [areas, devices, entities] = await Promise.all([
+                this.hass.connection.sendMessagePromise({
+                    type: "config/area_registry/list",
+                }),
+                this.hass.connection.sendMessagePromise({
+                    type: "config/device_registry/list",
+                }),
+                this.hass.connection.sendMessagePromise({
+                    type: "config/entity_registry/list",
+                }),
+            ]);
+            this._areas = (areas ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
+            this._devices = (devices ?? []).filter((d) => !d.disabled_by);
+            this._entities = (entities ?? []).filter((e) => !e.disabled_by && !e.hidden_by);
+        }
+        catch (err) {
+            this._error = `Could not load registries: ${this._errMsg(err)}`;
+        }
+        finally {
+            this._loading = false;
+        }
+    }
+    _errMsg(err) {
+        if (err instanceof Error)
+            return err.message;
+        if (typeof err === "string")
+            return err;
+        try {
+            return JSON.stringify(err);
+        }
+        catch {
+            return "unknown error";
+        }
+    }
+    _deviceLabel(d) {
+        return (d.name_by_user ||
+            d.name ||
+            d.id ||
+            "(unnamed device)");
+    }
+    _entityLabel(e) {
+        return e.name || e.original_name || e.entity_id;
+    }
+    _areaNameById(area_id) {
+        if (!area_id)
+            return "";
+        return this._areas.find((a) => a.area_id === area_id)?.name ?? area_id;
+    }
+    _filteredDevices() {
+        const f = this._filter.trim().toLowerCase();
+        return this._devices.filter((d) => {
+            if (!this._showAll && d.area_id)
+                return false;
+            if (!f)
+                return true;
+            const hay = (this._deviceLabel(d) + " " + (d.manufacturer ?? "") + " " +
+                (d.model ?? "")).toLowerCase();
+            return hay.includes(f);
+        });
+    }
+    _filteredEntities() {
+        const f = this._filter.trim().toLowerCase();
+        return this._entities.filter((e) => {
+            // Skip entities whose device already has an area (cascade
+            // handles them). User can flip Show All to override.
+            if (!this._showAll) {
+                if (e.area_id)
+                    return false;
+                if (e.device_id) {
+                    const dev = this._devices.find((d) => d.id === e.device_id);
+                    if (dev?.area_id)
+                        return false;
+                }
+            }
+            if (!f)
+                return true;
+            return e.entity_id.toLowerCase().includes(f) ||
+                this._entityLabel(e).toLowerCase().includes(f);
+        });
+    }
+    _onPick(key, area_id) {
+        const next = new Map(this._pending);
+        if (area_id === "__unchanged__") {
+            next.delete(key);
+        }
+        else {
+            next.set(key, area_id);
+        }
+        this._pending = next;
+    }
+    async _save() {
+        if (!this.hass || this._pending.size === 0)
+            return;
+        this._saving = true;
+        this._failedRows = [];
+        this._savedCount = 0;
+        const failed = [];
+        let saved = 0;
+        for (const [key, area_id] of this._pending.entries()) {
+            const [kind, id] = key.split(":", 2);
+            try {
+                if (kind === "device") {
+                    await this.hass.connection.sendMessagePromise({
+                        type: "config/device_registry/update",
+                        device_id: id,
+                        area_id: area_id || null,
+                    });
+                }
+                else if (kind === "entity") {
+                    await this.hass.connection.sendMessagePromise({
+                        type: "config/entity_registry/update_entity",
+                        entity_id: id,
+                        area_id: area_id || null,
+                    });
+                }
+                saved += 1;
+            }
+            catch (err) {
+                failed.push(`${id}: ${this._errMsg(err)}`);
+            }
+        }
+        this._savedCount = saved;
+        this._failedRows = failed;
+        this._saving = false;
+        // Refresh registries so the table reflects the saved state.
+        // (Cheap; HA caches and returns the new values.)
+        await this._fetchRegistries();
+        // Emit so the host can refresh its own list / fire a scan.
+        this.dispatchEvent(new CustomEvent("assignments-saved", {
+            detail: { saved, failed: failed.length },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+    _renderAreaPicker(key, currentAreaId) {
+        const pendingValue = this._pending.get(key);
+        // Three-state value: "__unchanged__" (initial), area_id (picked),
+        // or "" (explicit clear). Default selected = pendingValue ?? current.
+        const selected = pendingValue !== undefined
+            ? pendingValue
+            : (currentAreaId ?? "__unchanged__");
+        return b `
+      <select
+        class="area-picker"
+        .value=${selected}
+        @change=${(e) => {
+            const v = e.target.value;
+            this._onPick(key, v);
+        }}
+        ?disabled=${this._saving}
+      >
+        <option value="__unchanged__">
+          ${currentAreaId
+            ? `keep current (${this._areaNameById(currentAreaId)})`
+            : "— pick an area —"}
+        </option>
+        ${currentAreaId
+            ? b `<option value="">— clear area —</option>`
+            : A}
+        ${this._areas.map((a) => b `<option value=${a.area_id}>${a.name}</option>`)}
+      </select>
+    `;
+    }
+    _renderDeviceRows() {
+        const rows = this._filteredDevices();
+        if (rows.length === 0) {
+            return b `<div class="empty">
+        ${this._showAll
+                ? "No devices match the current filter."
+                : "Every device has an Area assigned. Toggle Show all to reassign."}
+      </div>`;
+        }
+        return b `
+      <table>
+        <thead>
+          <tr>
+            <th>Device</th>
+            <th>Manufacturer / Model</th>
+            <th>Current area</th>
+            <th>New area</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((d) => b `
+              <tr>
+                <td class="name">${this._deviceLabel(d)}</td>
+                <td class="meta">
+                  ${d.manufacturer ?? ""}${d.model ? ` · ${d.model}` : ""}
+                </td>
+                <td class="current">
+                  ${d.area_id
+            ? this._areaNameById(d.area_id)
+            : b `<em>none</em>`}
+                </td>
+                <td>${this._renderAreaPicker(`device:${d.id}`, d.area_id)}</td>
+              </tr>
+            `)}
+        </tbody>
+      </table>
+    `;
+    }
+    _renderEntityRows() {
+        const rows = this._filteredEntities();
+        if (rows.length === 0) {
+            return b `<div class="empty">
+        ${this._showAll
+                ? "No entities match the current filter."
+                : "Every entity has an Area (directly or via its device). Toggle Show all to reassign."}
+      </div>`;
+        }
+        return b `
+      <table>
+        <thead>
+          <tr>
+            <th>Entity</th>
+            <th>Device</th>
+            <th>Current area</th>
+            <th>New area</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((e) => {
+            const dev = e.device_id
+                ? this._devices.find((d) => d.id === e.device_id)
+                : undefined;
+            const effectiveArea = e.area_id ?? dev?.area_id ?? null;
+            return b `
+              <tr>
+                <td class="name">
+                  <div>${this._entityLabel(e)}</div>
+                  <div class="meta">${e.entity_id}</div>
+                </td>
+                <td class="meta">${dev ? this._deviceLabel(dev) : "—"}</td>
+                <td class="current">
+                  ${effectiveArea
+                ? b `${this._areaNameById(effectiveArea)}
+                        ${dev?.area_id && !e.area_id
+                    ? b `<span class="cascade">(from device)</span>`
+                    : A}`
+                : b `<em>none</em>`}
+                </td>
+                <td>
+                  ${this._renderAreaPicker(`entity:${e.entity_id}`, e.area_id)}
+                </td>
+              </tr>
+            `;
+        })}
+        </tbody>
+      </table>
+    `;
+    }
+    render() {
+        if (!this.open)
+            return A;
+        const pendingCount = this._pending.size;
+        return b `
+      <div class="backdrop" @click=${this._onClose}>
+        <div class="dialog" @click=${(e) => e.stopPropagation()}>
+          <div class="header">
+            <div class="title">📍 Bulk assign areas</div>
+            <button class="close" aria-label="Close" @click=${this._onClose}>
+              ×
+            </button>
+          </div>
+          <div class="body">
+            ${this._error
+            ? b `<div class="error">${this._error}</div>`
+            : A}
+            ${this._savedCount > 0
+            ? b `<div class="success">
+                  ✓ Saved ${this._savedCount} assignment${this._savedCount === 1 ? "" : "s"}.
+                </div>`
+            : A}
+            ${this._failedRows.length > 0
+            ? b `<div class="error">
+                  ${this._failedRows.length} row${this._failedRows.length === 1 ? "" : "s"} failed to save:
+                  <ul>
+                    ${this._failedRows.map((r) => b `<li>${r}</li>`)}
+                  </ul>
+                </div>`
+            : A}
+            <div class="toolbar">
+              <div class="tabs">
+                <button
+                  class="tab ${this._tab === "devices" ? "active" : ""}"
+                  @click=${() => (this._tab = "devices")}
+                >
+                  Devices
+                </button>
+                <button
+                  class="tab ${this._tab === "entities" ? "active" : ""}"
+                  @click=${() => (this._tab = "entities")}
+                >
+                  Entities
+                </button>
+              </div>
+              <div class="filters">
+                <input
+                  type="search"
+                  placeholder="Filter…"
+                  .value=${this._filter}
+                  @input=${(e) => (this._filter = e.target.value)}
+                />
+                <label class="show-all">
+                  <input
+                    type="checkbox"
+                    .checked=${this._showAll}
+                    @change=${(e) => (this._showAll = e.target.checked)}
+                  />
+                  Show all (incl. already assigned)
+                </label>
+              </div>
+            </div>
+            ${this._loading
+            ? b `<div class="empty">Loading registries…</div>`
+            : this._tab === "devices"
+                ? this._renderDeviceRows()
+                : this._renderEntityRows()}
+            <div class="hint">
+              Need a new area first?
+              <a href="/config/areas/dashboard">Create one in
+                Settings → Areas</a>, then re-open this dialog.
+            </div>
+          </div>
+          <div class="footer">
+            <button
+              class="btn"
+              @click=${this._onClose}
+              ?disabled=${this._saving}
+            >
+              ${pendingCount > 0 ? "Cancel" : "Close"}
+            </button>
+            <button
+              class="btn primary"
+              @click=${this._save}
+              ?disabled=${pendingCount === 0 || this._saving}
+            >
+              ${this._saving
+            ? "Saving…"
+            : pendingCount > 0
+                ? `Save ${pendingCount} change${pendingCount === 1 ? "" : "s"}`
+                : "No changes"}
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    }
+    static { this.styles = i$3 `
+    :host {
+      /* All styling via HA CSS variables — keeps this component
+         portable to HA core's frontend. */
+      --bulk-row-bg: var(--card-background-color, #fff);
+      --bulk-row-alt: var(--secondary-background-color, #f7f7f7);
+    }
+    .backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+    .dialog {
+      width: min(960px, 96vw);
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      background: var(--card-background-color, #fff);
+      color: var(--primary-text-color, #212121);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+    }
+    .header {
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--divider-color, #e0e0e0);
+    }
+    .title {
+      font-size: 1.15em;
+      font-weight: 500;
+    }
+    .close {
+      background: none;
+      border: none;
+      font-size: 1.6em;
+      cursor: pointer;
+      color: var(--secondary-text-color);
+    }
+    .body {
+      flex: 1;
+      overflow: auto;
+      padding: 14px 18px;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .tabs {
+      display: flex;
+      gap: 6px;
+    }
+    .tab {
+      background: transparent;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      padding: 6px 12px;
+      border-radius: 16px;
+      cursor: pointer;
+      font-size: 0.95em;
+      color: var(--secondary-text-color);
+    }
+    .tab.active {
+      background: var(--primary-color, #4c6ef5);
+      color: var(--text-primary-color, #fff);
+      border-color: var(--primary-color, #4c6ef5);
+    }
+    .filters {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .filters input[type="search"] {
+      padding: 6px 10px;
+      border-radius: 4px;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      background: var(--card-background-color, #fff);
+      color: var(--primary-text-color);
+      min-width: 180px;
+    }
+    .show-all {
+      font-size: 0.9em;
+      color: var(--secondary-text-color);
+      cursor: pointer;
+      user-select: none;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92em;
+    }
+    th {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--divider-color, #e0e0e0);
+      font-weight: 500;
+      color: var(--secondary-text-color);
+    }
+    td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--divider-color, #f0f0f0);
+      vertical-align: top;
+    }
+    tbody tr:nth-child(even) {
+      background: var(--bulk-row-alt);
+    }
+    td.name {
+      font-weight: 500;
+    }
+    td.meta,
+    div.meta {
+      color: var(--secondary-text-color);
+      font-size: 0.9em;
+    }
+    td.current em {
+      color: var(--secondary-text-color);
+      font-style: italic;
+    }
+    .cascade {
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+      margin-left: 4px;
+    }
+    .area-picker {
+      width: 100%;
+      padding: 5px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      background: var(--card-background-color, #fff);
+      color: var(--primary-text-color);
+    }
+    .empty {
+      padding: 32px 12px;
+      text-align: center;
+      color: var(--secondary-text-color);
+      font-style: italic;
+    }
+    .hint {
+      margin-top: 16px;
+      padding: 10px 12px;
+      background: var(--secondary-background-color, #f5f5f5);
+      border-radius: 4px;
+      font-size: 0.88em;
+      color: var(--secondary-text-color);
+    }
+    .hint a {
+      color: var(--primary-color, #4c6ef5);
+    }
+    .error {
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      background: rgba(244, 67, 54, 0.08);
+      border-left: 3px solid var(--error-color, #c62828);
+      border-radius: 4px;
+      color: var(--primary-text-color);
+      font-size: 0.92em;
+    }
+    .success {
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      background: rgba(76, 175, 80, 0.12);
+      border-left: 3px solid var(--success-color, #4caf50);
+      border-radius: 4px;
+      color: var(--primary-text-color);
+      font-size: 0.92em;
+    }
+    .footer {
+      padding: 12px 18px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      border-top: 1px solid var(--divider-color, #e0e0e0);
+      background: var(--secondary-background-color, #fafafa);
+    }
+    .btn {
+      padding: 8px 16px;
+      border-radius: 4px;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      background: var(--card-background-color, #fff);
+      color: var(--primary-text-color);
+      cursor: pointer;
+      font-size: 0.95em;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn.primary {
+      background: var(--primary-color, #4c6ef5);
+      color: var(--text-primary-color, #fff);
+      border-color: var(--primary-color, #4c6ef5);
+    }
+  `; }
+};
+__decorate([
+    n({ attribute: false })
+], BulkAreaAssignDialog.prototype, "hass", void 0);
+__decorate([
+    n({ type: Boolean, reflect: true })
+], BulkAreaAssignDialog.prototype, "open", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_tab", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_areas", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_devices", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_entities", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_pending", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_loading", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_saving", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_error", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_savedCount", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_failedRows", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_showAll", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_filter", void 0);
+BulkAreaAssignDialog = __decorate([
+    t("bulk-area-assign-dialog")
+], BulkAreaAssignDialog);
+
 const CARD_PROTOCOL_VERSION = 1;
 const DEFAULT_MAX_ROWS = 8;
 class HaInsightsCard extends i {
@@ -265,6 +911,10 @@ class HaInsightsCard extends i {
         /** v1.1: insight ids whose cohort_members list is currently shown
          *  expanded. Click "▸ show N" to toggle. Per-row state; not persisted. */
         this._expandedCohorts = new Set();
+        /** v1.2.6 — Open flag for the standalone <bulk-area-assign-dialog>
+         *  component. State lives INSIDE the dialog (so it's portable to HA
+         *  core); the card just toggles the open flag. */
+        this._bulkAreaAssignOpen = false;
         /**
          * v0.5: rows that fit in the card's currently-rendered height. Updated
          * by ResizeObserver. Used as the row cap when the user hasn't set
@@ -3789,6 +4439,19 @@ class HaInsightsCard extends i {
             : tier !== "GREAT" && step.next_step
                 ? b `<div class="setup-step-note">${step.next_step}</div>`
                 : A}
+        ${tier !== "GREAT" && step.feature_key === "presence_inference"
+            ? b `
+              <div class="setup-step-action">
+                <button
+                  class="action"
+                  title="Open a bulk area-assignment dialog inside HA Insights — no leaving the panel"
+                  @click=${() => {
+                this._bulkAreaAssignOpen = true;
+            }}
+                >📍 Bulk assign in HA Insights</button>
+              </div>
+            `
+            : A}
       </div>
     `;
     }
@@ -4075,6 +4738,17 @@ class HaInsightsCard extends i {
       </ha-card>
       ${this._renderDialog()}
       ${this._renderRefineAutomationModal()}
+      <bulk-area-assign-dialog
+        .hass=${this.hass}
+        ?open=${this._bulkAreaAssignOpen}
+        @closed=${() => {
+            this._bulkAreaAssignOpen = false;
+        }}
+        @assignments-saved=${(e) => {
+            const detail = e.detail;
+            this._toast = `Areas saved: ${detail.saved}${detail.failed ? ` (${detail.failed} failed)` : ""}`;
+        }}
+      ></bulk-area-assign-dialog>
     `;
     }
     /** v1.2.3 — Footer that says "Showing N of M — +X more → View all".
@@ -4190,6 +4864,9 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_refineAutomationModal", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_bulkAreaAssignOpen", void 0);
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_autoMaxRows", void 0);

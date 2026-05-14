@@ -10,6 +10,10 @@ import { LitElement, html, css, nothing, type TemplateResult, type PropertyValue
 import { property, state } from "lit/decorators.js";
 
 import "./ha-insights-card-editor";
+// v1.2.6 — Self-contained bulk-area-assign dialog. Designed to be
+// portable into HA core (only standard config-registry WS APIs, no
+// dependency on the HA Insights backend). See dialogs/ for details.
+import "./dialogs/bulk-area-assign-dialog";
 import type {
   CardConfig,
   ExplainResult,
@@ -114,6 +118,10 @@ export class HaInsightsCard extends LitElement {
      *  top of what's already there instead of starting from scratch. */
     auditInsightId?: string;
   };
+  /** v1.2.6 — Open flag for the standalone <bulk-area-assign-dialog>
+   *  component. State lives INSIDE the dialog (so it's portable to HA
+   *  core); the card just toggles the open flag. */
+  @state() private _bulkAreaAssignOpen = false;
   /**
    * v0.5: rows that fit in the card's currently-rendered height. Updated
    * by ResizeObserver. Used as the row cap when the user hasn't set
@@ -3887,6 +3895,19 @@ export class HaInsightsCard extends LitElement {
           : tier !== "GREAT" && step.next_step
             ? html`<div class="setup-step-note">${step.next_step}</div>`
             : nothing}
+        ${tier !== "GREAT" && step.feature_key === "presence_inference"
+          ? html`
+              <div class="setup-step-action">
+                <button
+                  class="action"
+                  title="Open a bulk area-assignment dialog inside HA Insights — no leaving the panel"
+                  @click=${() => {
+                    this._bulkAreaAssignOpen = true;
+                  }}
+                >📍 Bulk assign in HA Insights</button>
+              </div>
+            `
+          : nothing}
       </div>
     `;
   }
@@ -4178,6 +4199,19 @@ export class HaInsightsCard extends LitElement {
       </ha-card>
       ${this._renderDialog()}
       ${this._renderRefineAutomationModal()}
+      <bulk-area-assign-dialog
+        .hass=${this.hass as unknown as HassLite}
+        ?open=${this._bulkAreaAssignOpen}
+        @closed=${() => {
+          this._bulkAreaAssignOpen = false;
+        }}
+        @assignments-saved=${(e: CustomEvent) => {
+          const detail = e.detail as { saved: number; failed: number };
+          this._toast = `Areas saved: ${detail.saved}${
+            detail.failed ? ` (${detail.failed} failed)` : ""
+          }`;
+        }}
+      ></bulk-area-assign-dialog>
     `;
   }
 

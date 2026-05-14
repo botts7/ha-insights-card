@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.2.6] — 2026-05-14
+
+### Added
+
+- **`<bulk-area-assign-dialog>`** — self-contained dialog for bulk-
+  assigning entities and devices to areas, opened from the
+  setup_quality "Room presence inference" insight. Two tabs: Devices
+  (default — area on a device cascades to every entity it owns) and
+  Entities (per-entity override for floating entities or to break the
+  cascade). Per-row area picker, filter, "show all" toggle.
+
+  Designed for **HA core adoption**: uses only HA's standard config-
+  registry WebSocket APIs (`config/area_registry/list`,
+  `config/device_registry/list`, `config/entity_registry/list`,
+  `config/device_registry/update`, `config/entity_registry/update_entity`)
+  with no dependency on the HA Insights backend. Lives in
+  `src/dialogs/bulk-area-assign-dialog.ts` as a separate component
+  that could be lifted straight into HA core's `frontend/src/dialogs/`
+  by swapping the minimal `HassLite` import for the real
+  `HomeAssistant` type. Theming is HA CSS variables only.
+
 ## [1.2.5] — 2026-05-14
 
 ### Fixed
