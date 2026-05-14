@@ -675,6 +675,26 @@ class HaInsightsCard extends i {
       border-radius: 4px;
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
       color: var(--secondary-text-color);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .cohort-member-id {
+      /* The entity_id keeps the monospace look from the parent */
+    }
+    .cohort-member-badge {
+      font-family: var(--primary-font-family, sans-serif);
+      font-size: 0.85em;
+      padding: 1px 6px;
+      border-radius: 10px;
+    }
+    .cohort-member-int {
+      background: rgba(76, 110, 245, 0.15);
+      color: var(--secondary-text-color);
+    }
+    .cohort-member-ext {
+      background: rgba(255, 152, 0, 0.18);
+      color: var(--warning-color, #e65100);
     }
     /* Confidence pill color coding (v0.7) */
     .pill.confidence-high {
@@ -2656,6 +2676,43 @@ class HaInsightsCard extends i {
       </div>
     `;
     }
+    /** v1.5.13 — Render cohort dropdown rows with per-member 🔌 integration
+     *  and 🏷️ external-app badges. Falls back to plain entity_id chips
+     *  when the WS payload predates the cohort_member_info field. */
+    _renderCohortMembers(insight, members) {
+        const info = insight.cohort_member_info;
+        if (!Array.isArray(info) || info.length === 0) {
+            // Legacy / pre-v1.5.13 path — just the entity_id chip.
+            return members.map((m) => b `<span class="cohort-member-chip">${m}</span>`);
+        }
+        // Build a lookup so we render members in the order of `cohort_members`
+        // (canonical sort) but enriched with the metadata.
+        const byId = new Map();
+        for (const m of info) {
+            byId.set(m.entity_id, {
+                integration: m.integration,
+                external_source: m.external_source,
+            });
+        }
+        return members.map((eid) => {
+            const meta = byId.get(eid);
+            return b `<span class="cohort-member-chip">
+        <span class="cohort-member-id">${eid}</span>
+        ${meta?.integration
+                ? b `<span
+              class="cohort-member-badge cohort-member-int"
+              title="Source integration"
+            >🔌 ${meta.integration}</span>`
+                : A}
+        ${meta?.external_source
+                ? b `<span
+              class="cohort-member-badge cohort-member-ext"
+              title="Schedule likely lives in ${meta.external_source}, not HA"
+            >🏷️ ${meta.external_source}</span>`
+                : A}
+      </span>`;
+        });
+    }
     _renderRow(insight) {
         const confidencePct = Math.round(insight.confidence * 100);
         const confidenceClass = this._confidenceClass(insight.confidence);
@@ -2721,7 +2778,7 @@ class HaInsightsCard extends i {
             ? b `<div
               class="cohort-members"
               @click=${(e) => e.stopPropagation()}
-            >${members.map((m) => b `<span class="cohort-member-chip">${m}</span>`)}</div>`
+            >${this._renderCohortMembers(insight, members)}</div>`
             : A}
         <div class="row-meta">
           <span class="pill ${confidenceClass}">confidence ${confidencePct}%</span>

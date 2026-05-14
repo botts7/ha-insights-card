@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.5] — 2026-05-14
+
+### Fixed
+
+- **Per-member badges in cohort dropdown.** When a streak/long_tail/
+  orphan cohort mixed entities from multiple integrations, the
+  row-level `🏷️ managed externally` badge was suppressed by the
+  cohort-safety rule (don't falsely tag a non-Tuya entity as
+  Tuya-managed). UX cost: the user saw the *same entity_id* in two
+  different rows with different badges and it looked broken.
+  Expanded cohort dropdown now shows the `🔌 integration` +
+  `🏷️ external-app` badge next to each entity individually, so the
+  Tuya-managed lights get tagged correctly even when their cohort
+  includes a Hue/MQTT entity. Requires ha_insights ≥ 1.5.13 for the
+  enriched payload; falls back to plain entity-id chips when the
+  WS payload lacks `cohort_member_info` (older insights).
+
 ## [1.2.4] — 2026-05-14
 
 ### Fixed

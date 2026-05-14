@@ -72,6 +72,17 @@ export interface Insight {
    * cohort representative (title has "(+N similar entities)" suffix).
    * Card uses this to render an expand/collapse toggle. */
   cohort_members?: string[];
+  /** v1.5.13: per-member metadata so the expanded cohort dropdown
+   * can render a 🔌 integration + 🏷️ external-app badge next to each
+   * entity. Falls back to `cohort_members` when absent (older stored
+   * insights). external_source is null when the member has an HA
+   * automation referencing it OR when the member's integration isn't
+   * on the external-schedule platform list. */
+  cohort_member_info?: Array<{
+    entity_id: string;
+    integration?: string | null;
+    external_source?: string | null;
+  }>;
   /** v1.1: friendly group label shown when expanding the cohort,
    * e.g. "binary_sensor.home_nvr_*" or "scene.evening_garden". */
   cohort_label?: string | null;
