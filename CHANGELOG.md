@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.2] — 2026-05-14
+
+### Fixed
+
+- **Panel no longer goes blank after backgrounding the browser tab.**
+  When the tab is hidden long enough for HA's frontend to drop its
+  WebSocket connection, `home-assistant-js-websocket` auto-reconnects
+  AND auto-resubscribes our `home_insights/subscribe` handle — so the
+  live event stream stays intact. But any events fired *while paused*
+  go to a stale local list cache. Card now listens for
+  `document.visibilitychange` and on becoming-visible re-runs the
+  same `home_insights/list` refresh path the panel uses after a
+  Scan/Purge/Backfill. Single re-fetch on resume; no subscription
+  churn or workaround for built-in HA reconnect machinery.
+
 ## [1.2.1] — 2026-05-14
 
 ### Fixed

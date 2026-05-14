@@ -282,6 +282,18 @@ class HaInsightsCard extends i {
                 this._closeDialog();
             }
         };
+        /** v1.2.2 — Cleanup hooks for the visibility-resume listener.
+         *  Single listener; on document becoming visible we re-fetch via
+         *  the same path the panel's Scan/Purge/Backfill flows use.
+         *
+         *  Why this is enough: home-assistant-js-websocket's `Connection`
+         *  already auto-reconnects on socket drop AND auto-resubscribes
+         *  every `subscribeMessage` handle across reconnects. So our
+         *  subscription stays live — the only thing we need to handle is
+         *  refreshing the LIST after a long background period (in case
+         *  events were emitted while the tab was paused and the cache is
+         *  stale). HA's own panels follow the same pattern. */
+        this._resumeCleanups = [];
         this._scanStarted = () => {
             this._scanInProgress = true;
         };
@@ -1238,6 +1250,45 @@ class HaInsightsCard extends i {
             }
         });
         this._resizeObserver.observe(this);
+        this._installResumeHandlers();
+    }
+    /** v1.2.2 — Re-wire on tab-return AND on HA WebSocket reconnect.
+     *
+     * Without this, the card subscribes once on first mount (gated by
+     * `_wired`) and never re-establishes. When the tab is backgrounded
+     * long enough for HA's frontend to drop its WebSocket, the
+     * `_unsub` handle points at a dead subscription. On return:
+     *   - no new insights stream in
+     *   - the existing list is stale
+     *   - users hit page-refresh to recover
+     *
+     * Handlers:
+     *   1. document.visibilitychange (becoming visible) → refresh list
+     *      via the same path used after a scan completes. Cheap if the
+     *      WS is still alive; recovers state if it isn't.
+     *   2. hass.connection.addEventListener("disconnected") → record
+     *      the drop so we know to re-wire on the next "ready".
+     *   3. hass.connection.addEventListener("ready") → if we saw a
+     *      disconnect since the last wire, reset the subscription and
+     *      re-run _wire() to re-fetch + re-subscribe.
+     *
+     * All listeners are torn down in disconnectedCallback. */
+    _installResumeHandlers() {
+        const onVisibility = () => {
+            if (document.visibilityState !== "visible")
+                return;
+            if (!this.hass)
+                return;
+            // Cheap path — same code-path the panel's Scan/Purge/Backfill
+            // flow uses. Refreshes hello + list. If the WS dropped while
+            // the tab was backgrounded, home-assistant-js-websocket has
+            // already reconnected by the time visibilitychange fires (or
+            // is about to), and its built-in resubscribe handles the
+            // subscribeMessage handle — we don't need to re-wire that.
+            void this._refreshFromEvent();
+        };
+        document.addEventListener("visibilitychange", onVisibility);
+        this._resumeCleanups.push(() => document.removeEventListener("visibilitychange", onVisibility));
     }
     /** Approximate per-row height — title + meta + padding + border. */
     static { this.ROW_HEIGHT_PX = 72; }
@@ -1282,6 +1333,10 @@ class HaInsightsCard extends i {
         window.removeEventListener("keydown", this._keydownHandler);
         window.removeEventListener("ha-insights-scan-start", this._scanStarted);
         window.removeEventListener("ha-insights-refresh", this._refreshFromEvent);
+        // v1.2.2 — tear down the visibility-resume listener.
+        for (const cleanup of this._resumeCleanups)
+            cleanup();
+        this._resumeCleanups = [];
         document.body.style.overflow = "";
         this._unsub?.();
         this._unsub = undefined;
