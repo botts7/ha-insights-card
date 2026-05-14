@@ -189,6 +189,20 @@ export class HaInsightsCard extends LitElement {
     .header a.view-all:hover {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
     }
+    /* v1.2.3 — "Showing N of M — +X more →" footer for capped tiles */
+    .truncation-footer {
+      display: block;
+      padding: 8px 16px;
+      text-align: center;
+      font-size: 0.85em;
+      color: var(--primary-color);
+      text-decoration: none;
+      border-top: 1px solid var(--divider-color, #e0e0e0);
+      transition: background 120ms;
+    }
+    .truncation-footer:hover {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+    }
     /* Compact tile: single row, full-width clickable */
     .compact-tile {
       display: flex;
@@ -4060,9 +4074,28 @@ export class HaInsightsCard extends LitElement {
                   ]
                 : items.map((i) => this._renderRow(i)),
             )}
+        ${this._renderTruncationFooter(rows.length)}
       </ha-card>
       ${this._renderDialog()}
       ${this._renderRefineAutomationModal()}
+    `;
+  }
+
+  /** v1.2.3 — Footer that says "Showing N of M — +X more → View all".
+   *  Only appears when the dashboard tile is sized to show fewer rows
+   *  than the user actually has. Without it the tile shows 1 insight
+   *  with no hint that 25 more are queued behind "View all" in the
+   *  header. */
+  private _renderTruncationFooter(
+    rendered: number,
+  ): TemplateResult | typeof nothing {
+    const total = this._totalFilteredCount;
+    if (total <= rendered) return nothing;
+    const hidden = total - rendered;
+    return html`
+      <a class="truncation-footer" href="/ha-insights" title="Open the full HA Insights panel">
+        Showing ${rendered} of ${total} — +${hidden} more →
+      </a>
     `;
   }
 }

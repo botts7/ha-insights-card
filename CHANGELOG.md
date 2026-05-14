@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.3] — 2026-05-14
+
+### Added
+
+- **"Showing N of M — +X more →" footer** on the card when the
+  rendered row count is less than the full filtered count. Without
+  this, a dashboard tile sized to fit one insight just shows that
+  one with a "View all →" link in the header, and the user has no
+  way to know 25 more are queued behind it. The footer is itself a
+  clickable link to `/ha-insights`. Renders only when truncation is
+  actually happening (no footer when all rows fit).
+
 ## [1.2.2] — 2026-05-14
 
 ### Fixed
