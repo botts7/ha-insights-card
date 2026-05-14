@@ -735,6 +735,25 @@ export class HaInsightsCard extends LitElement {
       color: var(--secondary-text-color, #555);
       font-style: italic;
     }
+    /* Banner shown when the open setup_quality insight is from an
+       older detector version (no setup_steps in the payload) — gives
+       the user a real button to re-scan instead of dead text. */
+    .setup-stale-banner {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 6px;
+      background: var(--warning-background-color, rgba(255, 152, 0, 0.08));
+      border-left: 3px solid var(--warning-color, #ef6c00);
+      font-size: 0.92em;
+      color: var(--primary-text-color);
+    }
+    .setup-stale-banner strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+    .setup-stale-action {
+      margin-top: 10px;
+    }
 
     .refined-banner {
       padding: 10px 12px;
@@ -3701,7 +3720,24 @@ export class HaInsightsCard extends LitElement {
                 ${steps.map((s) => this._renderSetupStep(s))}
               </div>
             `
-          : nothing}
+          : html`
+              <div class="setup-stale-banner">
+                <strong>This insight was created before v1.5.11.</strong>
+                Re-scan to populate per-feature setup steps with deep-link
+                buttons. Until then, the actions live inline in the
+                explanation above.
+                <div class="setup-stale-action">
+                  <button
+                    class="action primary"
+                    ?disabled=${this._scanBusy}
+                    @click=${this._runScanNow}
+                    title="Refresh insights — regenerates this card with deep-link buttons for each setup step"
+                  >
+                    ${this._scanBusy ? "Scanning…" : "🔍 Run scan now"}
+                  </button>
+                </div>
+              </div>
+            `}
         <div class="subtitle" style="margin-top:12px;">
           After changing a setting, run Settings → Devices &amp; Services →
           HA Insights → <em>Scan now</em> to refresh setup completeness.

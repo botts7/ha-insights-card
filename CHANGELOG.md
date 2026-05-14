@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.4] — 2026-05-14
+
+### Fixed
+
+- **Graceful degrade when a setup_quality insight predates v1.5.11.**
+  Insights stored before the v1.5.11 detector update don't carry the
+  `setup_steps` array, so the new dialog body had nothing to render
+  in the feature-cards section — users saw the stale "Tap each to
+  learn more" copy from the old payload's explanation with no
+  visible tap target. Dialog now detects the missing `setup_steps`
+  and shows an inline "🔍 Run scan now" button instead of dead text,
+  with copy explaining that the actions live in the explanation
+  above until a re-scan refreshes the card.
+
 ## [1.2.3] — 2026-05-14
 
 ### Added
