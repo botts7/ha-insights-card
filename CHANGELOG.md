@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.2.1] — 2026-05-14
+
+### Fixed
+
+- **setup_quality dialog now shows a setup guide, not a YAML refine UI.**
+  The generic insight dialog (with JSON payload editor, "Customize" rename
+  form, "Notes for the LLM (used by Refine)" textarea, Refine / Test
+  actions / Apply buttons) is meaningless for `setup_quality` insights —
+  they're observational and the actionable response is "open HA settings
+  and wire X", not "tweak some YAML". The dialog now branches on
+  `insight.detector === "setup_quality"` and renders a per-feature
+  checklist with tier badge (✅ Working great / 🟢 Working / 🟠 Partial /
+  🔴 Not configured), an expandable "What this unlocks" list of concrete
+  scenarios, and a deep-link button to the relevant HA settings page
+  (`/config/areas/dashboard`, `/config/integrations/integration/ha_insights`,
+  Companion App docs, etc.). Footer keeps Dismiss + Snooze 7d; hides the
+  apply/refine surface that doesn't apply.
+
 ## [0.8.2] — 2026-05-10
 
 UX polish + recovery flows for the apply pipeline.

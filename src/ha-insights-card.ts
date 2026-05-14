@@ -633,6 +633,82 @@ export class HaInsightsCard extends LitElement {
       margin-top: 12px;
       flex-wrap: wrap;
     }
+
+    /* v1.5.11 — Setup-guide dialog body for setup_quality insights. */
+    .setup-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .setup-step {
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-left: 4px solid var(--divider-color, #e0e0e0);
+      border-radius: 6px;
+      padding: 10px 12px;
+      background: var(--card-background-color, #fff);
+    }
+    .setup-step--ok { border-left-color: var(--success-color, #4caf50); }
+    .setup-step--warn { border-left-color: var(--warning-color, #ef6c00); }
+    .setup-step--todo { border-left-color: var(--error-color, #c62828); }
+    .setup-step-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
+    }
+    .setup-step-tier {
+      font-size: 0.85em;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: var(--secondary-background-color, #f5f5f5);
+      color: var(--secondary-text-color, #555);
+      white-space: nowrap;
+    }
+    .setup-step-name {
+      font-size: 1em;
+      color: var(--primary-text-color);
+    }
+    .setup-step-advice {
+      margin-top: 6px;
+      color: var(--secondary-text-color, #555);
+      font-size: 0.92em;
+      line-height: 1.4;
+    }
+    .setup-step-scenarios {
+      margin-top: 8px;
+      font-size: 0.9em;
+    }
+    .setup-step-scenarios summary {
+      cursor: pointer;
+      color: var(--primary-color);
+      user-select: none;
+    }
+    .setup-step-scenarios ul {
+      margin: 6px 0 0;
+      padding-left: 18px;
+      color: var(--secondary-text-color, #555);
+    }
+    .setup-step-scenarios li {
+      margin: 2px 0;
+    }
+    .setup-step-action {
+      margin-top: 10px;
+    }
+    .setup-step-action .action {
+      display: inline-block;
+      text-decoration: none;
+    }
+    .setup-step-note {
+      margin-top: 8px;
+      padding: 6px 8px;
+      background: var(--secondary-background-color, #f5f5f5);
+      border-radius: 4px;
+      font-size: 0.88em;
+      color: var(--secondary-text-color, #555);
+      font-style: italic;
+    }
+
     .refined-banner {
       padding: 10px 12px;
       background: rgba(76, 175, 80, 0.15);
@@ -3478,6 +3554,173 @@ export class HaInsightsCard extends LitElement {
     `;
   }
 
+  /**
+   * v1.5.11 — Setup-guide dialog body for setup_quality insights.
+   *
+   * Why this exists separately from the generic dialog body: the
+   * default body assumes the insight has YAML to refine/apply. It
+   * shows a JSON payload editor, "Customize" rename form, "Notes
+   * for the LLM" textarea, etc. setup_quality insights are
+   * observational — they tell the user "wire X to unlock detector
+   * Y". The actionable surface is a deep-link to the right HA
+   * settings page, not a YAML editor.
+   *
+   * Handles BOTH:
+   *   - summary insights (fingerprint.kind = "setup_quality_summary")
+   *     payload contains `setup_steps` — a full per-feature roll-up.
+   *   - per-feature insights (fingerprint.kind = "setup_quality_feature")
+   *     payload contains single-feature shape — we synthesize a
+   *     one-item list so the same renderer handles both.
+   */
+  private _renderSetupGuideBody(insight: Insight): TemplateResult {
+    const busy = this._busyId === insight.id;
+    const confidencePct = Math.round(insight.confidence * 100);
+    const payload = (insight.payload ?? {}) as Record<string, unknown>;
+    type Step = {
+      feature?: string;
+      feature_key?: string;
+      tier?: string;
+      advice?: string;
+      next_step?: string;
+      scenarios?: string[];
+      setup_url?: string | null;
+      setup_url_label?: string | null;
+      setup_url_external?: boolean;
+    };
+    const steps: Step[] = Array.isArray(payload.setup_steps)
+      ? (payload.setup_steps as Step[])
+      : payload.feature_key
+        ? [
+            {
+              feature: payload.feature as string | undefined,
+              feature_key: payload.feature_key as string,
+              tier: payload.tier as string | undefined,
+              advice: (payload.advice as string | undefined) ?? "",
+              next_step: (payload.next_step as string | undefined) ?? "",
+              scenarios:
+                (payload.scenarios_unlocked as string[] | undefined) ?? [],
+              setup_url:
+                (payload.setup_url as string | null | undefined) ?? null,
+              setup_url_label:
+                (payload.setup_url_label as string | null | undefined) ?? null,
+              setup_url_external: !!payload.setup_url_external,
+            },
+          ]
+        : [];
+    const scorePct =
+      typeof payload.score === "number"
+        ? Math.round((payload.score as number) * 100)
+        : null;
+    return html`
+      <div class="dialog-body setup-guide-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">${insight.detector}</span>
+          ${scorePct !== null
+            ? html`<span class="pill">${scorePct}% complete</span>`
+            : nothing}
+        </div>
+        ${insight.explanation
+          ? html`<div class="explanation">${insight.explanation}</div>`
+          : nothing}
+        ${steps.length > 0
+          ? html`
+              <h4 style="margin-top:16px;">Features &amp; setup steps</h4>
+              <div class="setup-steps">
+                ${steps.map((s) => this._renderSetupStep(s))}
+              </div>
+            `
+          : nothing}
+        <div class="subtitle" style="margin-top:12px;">
+          After changing a setting, run Settings → Devices &amp; Services →
+          HA Insights → <em>Scan now</em> to refresh setup completeness.
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button class="action" ?disabled=${busy} @click=${() => this._dismiss(insight)}>
+          Dismiss
+        </button>
+        <button class="action" ?disabled=${busy} @click=${() => this._snooze(insight)}>
+          Snooze 7d
+        </button>
+      </div>
+    `;
+  }
+
+  private _renderSetupStep(step: {
+    feature?: string;
+    feature_key?: string;
+    tier?: string;
+    advice?: string;
+    next_step?: string;
+    scenarios?: string[];
+    setup_url?: string | null;
+    setup_url_label?: string | null;
+    setup_url_external?: boolean;
+  }): TemplateResult {
+    const tier = step.tier ?? "USELESS";
+    const tierBadge =
+      (
+        {
+          GREAT: { emoji: "✅", label: "Working great", cls: "ok" },
+          GOOD: { emoji: "🟢", label: "Working", cls: "ok" },
+          LIMITED: { emoji: "🟠", label: "Partial", cls: "warn" },
+          USELESS: { emoji: "🔴", label: "Not configured", cls: "todo" },
+        } as Record<string, { emoji: string; label: string; cls: string }>
+      )[tier] ?? { emoji: "⚪", label: tier, cls: "" };
+    const scenarios = Array.isArray(step.scenarios) ? step.scenarios : [];
+    const showScenarios = tier !== "GREAT" && scenarios.length > 0;
+    const hasUrl = !!step.setup_url;
+    const external = !!step.setup_url_external;
+    return html`
+      <div class="setup-step setup-step--${tierBadge.cls}">
+        <div class="setup-step-header">
+          <span class="setup-step-tier">
+            ${tierBadge.emoji} ${tierBadge.label}
+          </span>
+          <span class="setup-step-name">${step.feature ?? ""}</span>
+        </div>
+        ${step.advice
+          ? html`<div class="setup-step-advice">${step.advice}</div>`
+          : nothing}
+        ${showScenarios
+          ? html`
+              <details class="setup-step-scenarios">
+                <summary>What this unlocks</summary>
+                <ul>
+                  ${scenarios.map((s) => html`<li>${s}</li>`)}
+                </ul>
+              </details>
+            `
+          : nothing}
+        ${tier !== "GREAT" && hasUrl
+          ? external
+            ? html`
+                <div class="setup-step-action">
+                  <a
+                    class="action primary"
+                    href=${step.setup_url as string}
+                    target="_blank"
+                    rel="noopener"
+                  >${step.setup_url_label ?? "Set this up"} ↗</a>
+                </div>
+              `
+            : html`
+                <div class="setup-step-action">
+                  <a
+                    class="action primary"
+                    href=${step.setup_url as string}
+                  >${step.setup_url_label ?? "Set this up"} →</a>
+                </div>
+              `
+          : tier !== "GREAT" && step.next_step
+            ? html`<div class="setup-step-note">${step.next_step}</div>`
+            : nothing}
+      </div>
+    `;
+  }
+
   private _renderDialog(): TemplateResult | typeof nothing {
     if (!this._dialogId) return nothing;
     const insight = this._insights.find((i) => i.id === this._dialogId);
@@ -3504,7 +3747,9 @@ export class HaInsightsCard extends LitElement {
                 ${this._renderTestResults()}
                 ${this._renderRefinedPreview(insight, refined)}
               </div>`
-            : html`
+            : insight.detector === "setup_quality"
+              ? this._renderSetupGuideBody(insight)
+              : html`
                 <div class="dialog-body">
                   ${this._renderModalError()}
                   ${this._renderTestResults()}

@@ -816,6 +816,82 @@ class HaInsightsCard extends i {
       margin-top: 12px;
       flex-wrap: wrap;
     }
+
+    /* v1.5.11 — Setup-guide dialog body for setup_quality insights. */
+    .setup-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .setup-step {
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-left: 4px solid var(--divider-color, #e0e0e0);
+      border-radius: 6px;
+      padding: 10px 12px;
+      background: var(--card-background-color, #fff);
+    }
+    .setup-step--ok { border-left-color: var(--success-color, #4caf50); }
+    .setup-step--warn { border-left-color: var(--warning-color, #ef6c00); }
+    .setup-step--todo { border-left-color: var(--error-color, #c62828); }
+    .setup-step-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
+    }
+    .setup-step-tier {
+      font-size: 0.85em;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: var(--secondary-background-color, #f5f5f5);
+      color: var(--secondary-text-color, #555);
+      white-space: nowrap;
+    }
+    .setup-step-name {
+      font-size: 1em;
+      color: var(--primary-text-color);
+    }
+    .setup-step-advice {
+      margin-top: 6px;
+      color: var(--secondary-text-color, #555);
+      font-size: 0.92em;
+      line-height: 1.4;
+    }
+    .setup-step-scenarios {
+      margin-top: 8px;
+      font-size: 0.9em;
+    }
+    .setup-step-scenarios summary {
+      cursor: pointer;
+      color: var(--primary-color);
+      user-select: none;
+    }
+    .setup-step-scenarios ul {
+      margin: 6px 0 0;
+      padding-left: 18px;
+      color: var(--secondary-text-color, #555);
+    }
+    .setup-step-scenarios li {
+      margin: 2px 0;
+    }
+    .setup-step-action {
+      margin-top: 10px;
+    }
+    .setup-step-action .action {
+      display: inline-block;
+      text-decoration: none;
+    }
+    .setup-step-note {
+      margin-top: 8px;
+      padding: 6px 8px;
+      background: var(--secondary-background-color, #f5f5f5);
+      border-radius: 4px;
+      font-size: 0.88em;
+      color: var(--secondary-text-color, #555);
+      font-style: italic;
+    }
+
     .refined-banner {
       padding: 10px 12px;
       background: rgba(76, 175, 80, 0.15);
@@ -3417,6 +3493,143 @@ class HaInsightsCard extends i {
       </div>
     `;
     }
+    /**
+     * v1.5.11 — Setup-guide dialog body for setup_quality insights.
+     *
+     * Why this exists separately from the generic dialog body: the
+     * default body assumes the insight has YAML to refine/apply. It
+     * shows a JSON payload editor, "Customize" rename form, "Notes
+     * for the LLM" textarea, etc. setup_quality insights are
+     * observational — they tell the user "wire X to unlock detector
+     * Y". The actionable surface is a deep-link to the right HA
+     * settings page, not a YAML editor.
+     *
+     * Handles BOTH:
+     *   - summary insights (fingerprint.kind = "setup_quality_summary")
+     *     payload contains `setup_steps` — a full per-feature roll-up.
+     *   - per-feature insights (fingerprint.kind = "setup_quality_feature")
+     *     payload contains single-feature shape — we synthesize a
+     *     one-item list so the same renderer handles both.
+     */
+    _renderSetupGuideBody(insight) {
+        const busy = this._busyId === insight.id;
+        const confidencePct = Math.round(insight.confidence * 100);
+        const payload = (insight.payload ?? {});
+        const steps = Array.isArray(payload.setup_steps)
+            ? payload.setup_steps
+            : payload.feature_key
+                ? [
+                    {
+                        feature: payload.feature,
+                        feature_key: payload.feature_key,
+                        tier: payload.tier,
+                        advice: payload.advice ?? "",
+                        next_step: payload.next_step ?? "",
+                        scenarios: payload.scenarios_unlocked ?? [],
+                        setup_url: payload.setup_url ?? null,
+                        setup_url_label: payload.setup_url_label ?? null,
+                        setup_url_external: !!payload.setup_url_external,
+                    },
+                ]
+                : [];
+        const scorePct = typeof payload.score === "number"
+            ? Math.round(payload.score * 100)
+            : null;
+        return b `
+      <div class="dialog-body setup-guide-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">${insight.detector}</span>
+          ${scorePct !== null
+            ? b `<span class="pill">${scorePct}% complete</span>`
+            : A}
+        </div>
+        ${insight.explanation
+            ? b `<div class="explanation">${insight.explanation}</div>`
+            : A}
+        ${steps.length > 0
+            ? b `
+              <h4 style="margin-top:16px;">Features &amp; setup steps</h4>
+              <div class="setup-steps">
+                ${steps.map((s) => this._renderSetupStep(s))}
+              </div>
+            `
+            : A}
+        <div class="subtitle" style="margin-top:12px;">
+          After changing a setting, run Settings → Devices &amp; Services →
+          HA Insights → <em>Scan now</em> to refresh setup completeness.
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button class="action" ?disabled=${busy} @click=${() => this._dismiss(insight)}>
+          Dismiss
+        </button>
+        <button class="action" ?disabled=${busy} @click=${() => this._snooze(insight)}>
+          Snooze 7d
+        </button>
+      </div>
+    `;
+    }
+    _renderSetupStep(step) {
+        const tier = step.tier ?? "USELESS";
+        const tierBadge = {
+            GREAT: { emoji: "✅", label: "Working great", cls: "ok" },
+            GOOD: { emoji: "🟢", label: "Working", cls: "ok" },
+            LIMITED: { emoji: "🟠", label: "Partial", cls: "warn" },
+            USELESS: { emoji: "🔴", label: "Not configured", cls: "todo" },
+        }[tier] ?? { emoji: "⚪", label: tier, cls: "" };
+        const scenarios = Array.isArray(step.scenarios) ? step.scenarios : [];
+        const showScenarios = tier !== "GREAT" && scenarios.length > 0;
+        const hasUrl = !!step.setup_url;
+        const external = !!step.setup_url_external;
+        return b `
+      <div class="setup-step setup-step--${tierBadge.cls}">
+        <div class="setup-step-header">
+          <span class="setup-step-tier">
+            ${tierBadge.emoji} ${tierBadge.label}
+          </span>
+          <span class="setup-step-name">${step.feature ?? ""}</span>
+        </div>
+        ${step.advice
+            ? b `<div class="setup-step-advice">${step.advice}</div>`
+            : A}
+        ${showScenarios
+            ? b `
+              <details class="setup-step-scenarios">
+                <summary>What this unlocks</summary>
+                <ul>
+                  ${scenarios.map((s) => b `<li>${s}</li>`)}
+                </ul>
+              </details>
+            `
+            : A}
+        ${tier !== "GREAT" && hasUrl
+            ? external
+                ? b `
+                <div class="setup-step-action">
+                  <a
+                    class="action primary"
+                    href=${step.setup_url}
+                    target="_blank"
+                    rel="noopener"
+                  >${step.setup_url_label ?? "Set this up"} ↗</a>
+                </div>
+              `
+                : b `
+                <div class="setup-step-action">
+                  <a
+                    class="action primary"
+                    href=${step.setup_url}
+                  >${step.setup_url_label ?? "Set this up"} →</a>
+                </div>
+              `
+            : tier !== "GREAT" && step.next_step
+                ? b `<div class="setup-step-note">${step.next_step}</div>`
+                : A}
+      </div>
+    `;
+    }
     _renderDialog() {
         if (!this._dialogId)
             return A;
@@ -3445,7 +3658,9 @@ class HaInsightsCard extends i {
                 ${this._renderTestResults()}
                 ${this._renderRefinedPreview(insight, refined)}
               </div>`
-            : b `
+            : insight.detector === "setup_quality"
+                ? this._renderSetupGuideBody(insight)
+                : b `
                 <div class="dialog-body">
                   ${this._renderModalError()}
                   ${this._renderTestResults()}
@@ -3454,28 +3669,28 @@ class HaInsightsCard extends i {
                     <span class="pill">${insight.detector}</span>
                     ${insight.area_id ? b `<span class="pill">${insight.area_id}</span>` : A}
                     ${insight.conflicts_with.length > 0
-                ? b `<span class="pill" style="color: var(--warning-color)">conflicts</span>`
-                : A}
+                    ? b `<span class="pill" style="color: var(--warning-color)">conflicts</span>`
+                    : A}
                   </div>
                   <h4>${this._payloadHeading(insight.payload_format)}</h4>
                   ${this._renderPayloadView(insight)}
                   ${insight.explanation
-                ? b `<div class="explanation">${insight.explanation}</div>`
-                : A}
+                    ? b `<div class="explanation">${insight.explanation}</div>`
+                    : A}
                   ${this._hypothesisById.has(insight.id)
-                ? b `<div class="explanation hypothesis">
+                    ? b `<div class="explanation hypothesis">
                         <strong>Likely causes:</strong>
                         ${this._hypothesisById.get(insight.id)}
                       </div>`
-                : A}
+                    : A}
                   ${this._renderPreview(insight)}
                   ${this._renderRename(insight, undefined)}
                   ${llmEnabled
-                ? this._renderFeedbackInput(insight, "Notes for the LLM (optional, used by Refine)")
-                : A}
+                    ? this._renderFeedbackInput(insight, "Notes for the LLM (optional, used by Refine)")
+                    : A}
                   <div class="explain-row">
                     ${llmEnabled && !insight.explanation
-                ? b `
+                    ? b `
                           <button
                             class="action ${this._explainBusy ? "busy-pulse" : ""}"
                             ?disabled=${this._explainBusy}
@@ -3484,39 +3699,39 @@ class HaInsightsCard extends i {
                             ${this._explainBusy ? "💭 thinking…" : "Explain with LLM"}
                           </button>
                         `
-                : A}
+                    : A}
                     ${llmEnabled && insight.payload_format === "automation"
-                ? b `
+                    ? b `
                           <button
                             class="action ${this._refineBusy ? "busy-pulse" : ""}"
                             ?disabled=${this._refineBusy}
                             title="${this._refineConversationById.has(insight.id)
-                    ? "Continue the LLM conversation with new feedback"
-                    : "Ask the LLM to refine this automation"}"
+                        ? "Continue the LLM conversation with new feedback"
+                        : "Ask the LLM to refine this automation"}"
                             @click=${() => this._refine(insight)}
                           >
                             ${this._refineBusy
-                    ? "💭 refining…"
-                    : this._refineConversationById.has(insight.id)
-                        ? `✨ Refine again (turn ${(this._refineTurnsById.get(insight.id) ?? 0) + 1})`
-                        : "✨ Refine with LLM"}
+                        ? "💭 refining…"
+                        : this._refineConversationById.has(insight.id)
+                            ? `✨ Refine again (turn ${(this._refineTurnsById.get(insight.id) ?? 0) + 1})`
+                            : "✨ Refine with LLM"}
                           </button>
                           ${this._refineConversationById.has(insight.id)
-                    ? b `<button
+                        ? b `<button
                                 class="action"
                                 title="Forget the prior conversation and start a fresh refine thread"
                                 @click=${() => {
-                        this._resetRefineConversation(insight.id);
-                        this._toast = "Refine conversation reset";
-                    }}
+                            this._resetRefineConversation(insight.id);
+                            this._toast = "Refine conversation reset";
+                        }}
                               >
                                 🔁 Reset conversation
                               </button>`
-                    : A}
+                        : A}
                         `
-                : A}
+                    : A}
                     ${llmEnabled
-                ? b `
+                    ? b `
                           <button
                             class="action"
                             ?disabled=${this._previewBusy}
@@ -3524,15 +3739,15 @@ class HaInsightsCard extends i {
                             @click=${() => this._previewRedaction(insight)}
                           >
                             ${this._previewBusy
-                    ? "loading…"
-                    : this._previewById.has(insight.id)
-                        ? "🛡️ Hide preview"
-                        : "🛡️ What gets sent?"}
+                        ? "loading…"
+                        : this._previewById.has(insight.id)
+                            ? "🛡️ Hide preview"
+                            : "🛡️ What gets sent?"}
                           </button>
                         `
-                : A}
+                    : A}
                     ${llmEnabled && insight.kind === "anomaly"
-                ? b `
+                    ? b `
                           <button
                             class="action ${this._hypothesizeBusy ? "busy-pulse" : ""}"
                             ?disabled=${this._hypothesizeBusy}
@@ -3540,15 +3755,15 @@ class HaInsightsCard extends i {
                             @click=${() => this._hypothesize(insight)}
                           >
                             ${this._hypothesizeBusy
-                    ? "💭 thinking…"
-                    : this._hypothesisById.has(insight.id)
-                        ? "🔍 Re-hypothesize"
-                        : "🔍 Get hypothesis"}
+                        ? "💭 thinking…"
+                        : this._hypothesisById.has(insight.id)
+                            ? "🔍 Re-hypothesize"
+                            : "🔍 Get hypothesis"}
                           </button>
                         `
-                : A}
+                    : A}
                     ${ttsConfigured && insight.explanation
-                ? b `
+                    ? b `
                           <button
                             class="action"
                             ?disabled=${this._ttsBusy}
@@ -3558,9 +3773,9 @@ class HaInsightsCard extends i {
                             ${this._ttsBusy ? "speaking…" : "🔊 Read aloud"}
                           </button>
                         `
-                : A}
+                    : A}
                     ${insight.payload_format === "automation"
-                ? b `<button
+                    ? b `<button
                           class="action"
                           ?disabled=${this._testBusy}
                           title="Fire the action(s) for real"
@@ -3568,22 +3783,22 @@ class HaInsightsCard extends i {
                         >
                           ${this._testBusy ? "testing…" : "🔥 Test actions"}
                         </button>`
-                : A}
+                    : A}
                   </div>
                   ${!llmEnabled
-                ? b `<div class="subtitle" style="margin-top: 12px;">
+                    ? b `<div class="subtitle" style="margin-top: 12px;">
                         LLM Explain / Refine disabled — enable Local or Cloud mode in
                         Settings → Devices & Services.
                       </div>`
-                : A}
+                    : A}
                 </div>
                 <div class="dialog-footer">
                   <button class="action" ?disabled=${busy} @click=${() => this._dismiss(insight)}>
                     Dismiss
                   </button>
                   ${insight.applied_at
-                ? A
-                : b `<button
+                    ? A
+                    : b `<button
                         class="action"
                         ?disabled=${busy}
                         @click=${() => this._snooze(insight)}
@@ -3591,7 +3806,7 @@ class HaInsightsCard extends i {
                         Snooze 7d
                       </button>`}
                   ${insight.applied_at
-                ? b `<button
+                    ? b `<button
                         class="action primary"
                         ?disabled=${busy}
                         title="Remove the automation and revert this insight to active"
@@ -3599,15 +3814,15 @@ class HaInsightsCard extends i {
                       >
                         ${busy ? "undoing…" : "↶ Undo apply"}
                       </button>`
-                : insight.payload_format === "automation"
-                    ? b `<button
+                    : insight.payload_format === "automation"
+                        ? b `<button
                           class="action primary"
                           ?disabled=${busy}
                           @click=${() => this._apply(insight)}
                         >
                           ${busy ? "applying…" : "Apply"}
                         </button>`
-                    : A}
+                        : A}
                 </div>
               `}
         </div>
