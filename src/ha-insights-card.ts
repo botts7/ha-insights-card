@@ -3067,6 +3067,7 @@ export class HaInsightsCard extends LitElement {
                 title="HA noticed this pattern but the schedule is managed in the vendor app (${insight.external_source}) — not in HA. Creating a new HA automation likely won't help."
               >🏷️ managed externally (${insight.external_source})</span>`
             : nothing}
+          ${this._renderTimingPill(insight)}
           ${insight.explanation
             ? html`<span class="pill" title="LLM explanation available">💬 explained</span>`
             : nothing}
@@ -3135,6 +3136,52 @@ export class HaInsightsCard extends LitElement {
     if (confidence >= 0.8) return "confidence-high";
     if (confidence >= 0.5) return "confidence-medium";
     return "confidence-low";
+  }
+
+  /** v1.2.17 — Surface the lib/timing_likelihood assessment as a small
+   *  row pill so users see WHY a confidence is what it is.
+   *
+   *  Three tiers:
+   *    DEVICE_LIKELY  → 🤖 device-managed pill, warning color. The
+   *      timing is statistically too tight to be a human action (BLE
+   *      toothbrush firing OFF exactly 2 min after ON, solar inverter
+   *      at sunrise via cloud polling, etc). Confidence already cut
+   *      by 80% server-side; the pill explains the demotion.
+   *    TIGHT_PATTERN → 🤖 tight-pattern pill, info color. Plausibly
+   *      human (alarm-driven routine) but tight enough that a device
+   *      timer is also possible. Confidence cut by 15%; pill prompts
+   *      the user to think about it.
+   *    HUMAN_LIKELY / INSUFFICIENT_DATA → nothing rendered.
+   *
+   *  Backend ships `_timing_assessment` in the payload (underscore-
+   *  prefixed → stripped before automations.yaml write). The card
+   *  reads it for rendering only.
+   */
+  private _renderTimingPill(insight: Insight): TemplateResult | typeof nothing {
+    const payload = insight.payload as Record<string, unknown> | undefined;
+    if (!payload) return nothing;
+    const t = payload._timing_assessment as
+      | { timing_class?: string; reason?: string; stddev_seconds?: number; range_seconds?: number }
+      | undefined;
+    if (!t || typeof t.timing_class !== "string") return nothing;
+    const reason = typeof t.reason === "string"
+      ? t.reason
+      : "Timing analysis details unavailable";
+    if (t.timing_class === "device_likely") {
+      return html`<span
+        class="pill"
+        style="color: var(--warning-color, #ef6c00); background: rgba(239, 108, 0, 0.08);"
+        title=${reason}
+      >🤖 device-managed</span>`;
+    }
+    if (t.timing_class === "tight_pattern") {
+      return html`<span
+        class="pill"
+        style="color: var(--info-color, #2196f3); background: rgba(33, 150, 243, 0.08);"
+        title=${reason}
+      >🤖 tight-pattern</span>`;
+    }
+    return nothing;
   }
 
   /** Rewrite the title for already-shadowed insights so it doesn't read
