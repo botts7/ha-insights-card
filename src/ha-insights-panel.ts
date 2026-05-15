@@ -1230,6 +1230,7 @@ export class HaInsightsPanel extends LitElement {
           <button
             class="action"
             ?disabled=${this._backfillBusy}
+            aria-label="Backfill state-event buffer from recorder"
             title="Re-populate the buffer from HA's recorder"
             @click=${this._runBackfill}
           >
@@ -1238,6 +1239,7 @@ export class HaInsightsPanel extends LitElement {
           <button
             class="action"
             ?disabled=${this._rollupBusy}
+            aria-label="Run audit rollup against recorder history"
             title="Recompute long-term audit rollups (day-of-week / month-of-year buckets) from HA's recorder. Single click chains batches until everything is caught up OR 5-minute ceiling — Stop button interrupts."
             @click=${this._runAuditRollup}
           >
@@ -1246,6 +1248,7 @@ export class HaInsightsPanel extends LitElement {
           ${this._rollupBusy
             ? html`<button
                 class="action"
+                aria-label="Stop audit rollup loop"
                 title="Stop chaining batches. The current batch finishes; no new batch is started."
                 @click=${this._stopRollupLoop}
               >
@@ -1255,6 +1258,7 @@ export class HaInsightsPanel extends LitElement {
           <button
             class="action"
             ?disabled=${this._scanBusy}
+            aria-label="Run all detectors now"
             title="Run all detectors against the current buffer"
             @click=${this._runScanNow}
           >
@@ -1263,6 +1267,7 @@ export class HaInsightsPanel extends LitElement {
           ${this._scanBusy
             ? html`<button
                 class="action"
+                aria-label="Stop the in-flight scan"
                 title="Stop the in-flight scan after the current detector"
                 @click=${this._cancelScan}
               >
@@ -1271,6 +1276,7 @@ export class HaInsightsPanel extends LitElement {
             : ""}
           <button
             class="action"
+            aria-label="Reload HA Insights UI"
             title="Re-register the panel with a fresh cache-bust + force browser reload — use after deploying a new ha-insights-card.js / panel.js"
             @click=${this._reloadUi}
           >
@@ -1278,6 +1284,7 @@ export class HaInsightsPanel extends LitElement {
           </button>
           <button
             class="action"
+            aria-label="Purge all stored insights"
             title="Delete every stored insight (useful when a noisy scan filled the list)"
             @click=${this._purgeAllInsights}
           >
@@ -1286,6 +1293,7 @@ export class HaInsightsPanel extends LitElement {
           <button
             class="action"
             ?disabled=${this._bulkBusy}
+            aria-label="Apply every visible automation insight"
             title="Apply every visible automation insight (respects search + confidence filters)"
             @click=${this._runBulkApply}
           >

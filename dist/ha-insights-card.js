@@ -3512,6 +3512,8 @@ class HaInsightsCard extends i {
             ? b ` <button
                 class="pill-action"
                 style="margin-left:6px;"
+                aria-label="${expanded ? "Hide" : "Show"} ${members.length} cohort members"
+                aria-expanded="${expanded}"
                 title="${expanded ? "Hide" : "Show"} the ${members.length} cohort members"
                 @click=${(e) => {
                 e.stopPropagation();
@@ -3523,6 +3525,8 @@ class HaInsightsCard extends i {
             ? b ` <button
                 class="pill-action"
                 style="margin-left:6px;"
+                aria-label="${auditExpanded ? 'Hide' : 'Show'} ${auditObservations.length} audit finding${auditObservations.length === 1 ? '' : 's'}"
+                aria-expanded="${auditExpanded}"
                 title="${auditExpanded ? 'Hide' : 'Show'} the ${auditObservations.length} audit finding${auditObservations.length === 1 ? '' : 's'}"
                 @click=${(e) => {
                 e.stopPropagation();
@@ -3722,6 +3726,7 @@ class HaInsightsCard extends i {
         ${only?.id
                 ? b `<button
               class="pill-action"
+              aria-label="Refine automation '${only.alias}' with AI"
               title="Refine this automation with AI"
               @click=${(e) => {
                     e.stopPropagation();
@@ -3755,6 +3760,7 @@ class HaInsightsCard extends i {
             ${link.id
                 ? b `<button
                   class="pill-action"
+                  aria-label="Refine automation '${link.alias}' with AI"
                   title="Refine '${link.alias}' with AI"
                   @click=${(e) => {
                     e.stopPropagation();

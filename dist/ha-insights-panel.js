@@ -3512,6 +3512,8 @@ class HaInsightsCard extends i {
             ? b ` <button
                 class="pill-action"
                 style="margin-left:6px;"
+                aria-label="${expanded ? "Hide" : "Show"} ${members.length} cohort members"
+                aria-expanded="${expanded}"
                 title="${expanded ? "Hide" : "Show"} the ${members.length} cohort members"
                 @click=${(e) => {
                 e.stopPropagation();
@@ -3523,6 +3525,8 @@ class HaInsightsCard extends i {
             ? b ` <button
                 class="pill-action"
                 style="margin-left:6px;"
+                aria-label="${auditExpanded ? 'Hide' : 'Show'} ${auditObservations.length} audit finding${auditObservations.length === 1 ? '' : 's'}"
+                aria-expanded="${auditExpanded}"
                 title="${auditExpanded ? 'Hide' : 'Show'} the ${auditObservations.length} audit finding${auditObservations.length === 1 ? '' : 's'}"
                 @click=${(e) => {
                 e.stopPropagation();
@@ -3722,6 +3726,7 @@ class HaInsightsCard extends i {
         ${only?.id
                 ? b `<button
               class="pill-action"
+              aria-label="Refine automation '${only.alias}' with AI"
               title="Refine this automation with AI"
               @click=${(e) => {
                     e.stopPropagation();
@@ -3755,6 +3760,7 @@ class HaInsightsCard extends i {
             ${link.id
                 ? b `<button
                   class="pill-action"
+                  aria-label="Refine automation '${link.alias}' with AI"
                   title="Refine '${link.alias}' with AI"
                   @click=${(e) => {
                     e.stopPropagation();
@@ -6132,6 +6138,7 @@ class HaInsightsPanel extends i {
           <button
             class="action"
             ?disabled=${this._backfillBusy}
+            aria-label="Backfill state-event buffer from recorder"
             title="Re-populate the buffer from HA's recorder"
             @click=${this._runBackfill}
           >
@@ -6140,6 +6147,7 @@ class HaInsightsPanel extends i {
           <button
             class="action"
             ?disabled=${this._rollupBusy}
+            aria-label="Run audit rollup against recorder history"
             title="Recompute long-term audit rollups (day-of-week / month-of-year buckets) from HA's recorder. Single click chains batches until everything is caught up OR 5-minute ceiling — Stop button interrupts."
             @click=${this._runAuditRollup}
           >
@@ -6148,6 +6156,7 @@ class HaInsightsPanel extends i {
           ${this._rollupBusy
             ? b `<button
                 class="action"
+                aria-label="Stop audit rollup loop"
                 title="Stop chaining batches. The current batch finishes; no new batch is started."
                 @click=${this._stopRollupLoop}
               >
@@ -6157,6 +6166,7 @@ class HaInsightsPanel extends i {
           <button
             class="action"
             ?disabled=${this._scanBusy}
+            aria-label="Run all detectors now"
             title="Run all detectors against the current buffer"
             @click=${this._runScanNow}
           >
@@ -6165,6 +6175,7 @@ class HaInsightsPanel extends i {
           ${this._scanBusy
             ? b `<button
                 class="action"
+                aria-label="Stop the in-flight scan"
                 title="Stop the in-flight scan after the current detector"
                 @click=${this._cancelScan}
               >
@@ -6173,6 +6184,7 @@ class HaInsightsPanel extends i {
             : ""}
           <button
             class="action"
+            aria-label="Reload HA Insights UI"
             title="Re-register the panel with a fresh cache-bust + force browser reload — use after deploying a new ha-insights-card.js / panel.js"
             @click=${this._reloadUi}
           >
@@ -6180,6 +6192,7 @@ class HaInsightsPanel extends i {
           </button>
           <button
             class="action"
+            aria-label="Purge all stored insights"
             title="Delete every stored insight (useful when a noisy scan filled the list)"
             @click=${this._purgeAllInsights}
           >
@@ -6188,6 +6201,7 @@ class HaInsightsPanel extends i {
           <button
             class="action"
             ?disabled=${this._bulkBusy}
+            aria-label="Apply every visible automation insight"
             title="Apply every visible automation insight (respects search + confidence filters)"
             @click=${this._runBulkApply}
           >
