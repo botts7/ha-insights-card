@@ -3160,35 +3160,60 @@ export class HaInsightsCard extends LitElement {
   private _renderTimingPill(insight: Insight): TemplateResult | typeof nothing {
     const payload = insight.payload as Record<string, unknown> | undefined;
     if (!payload) return nothing;
+    // v1.2.19: read all three grader assessments (the v1.5.38
+    // composite payload-keys output). Any one signal alone produces a
+    // pill; multiple signals stack into a multi-line tooltip.
     const t = payload._timing_assessment as
-      | { timing_class?: string; reason?: string; stddev_seconds?: number; range_seconds?: number }
+      | { timing_class?: string; reason?: string }
       | undefined;
-    // v1.2.18: also read co-occurrence to compose tooltip reason.
-    // Either signal alone produces a pill; both together combine
-    // the reasons (timing on first line, co-occurrence on second).
     const c = payload._cooccurrence_assessment as
       | { cooccurrence_class?: string; reason?: string }
+      | undefined;
+    const p = payload._persistence_assessment as
+      | { persistence_class?: string; reason?: string }
       | undefined;
     const timingClass = typeof t?.timing_class === "string" ? t.timing_class : "";
     const cooccClass = typeof c?.cooccurrence_class === "string"
       ? c.cooccurrence_class
       : "";
+    const persClass = typeof p?.persistence_class === "string"
+      ? p.persistence_class
+      : "";
     const isDeviceTiming = timingClass === "device_likely";
     const isTightTiming = timingClass === "tight_pattern";
     const isIsolatedCoocc = cooccClass === "isolated";
     const isAmbiguousCoocc = cooccClass === "ambiguous";
-    if (!isDeviceTiming && !isTightTiming && !isIsolatedCoocc && !isAmbiguousCoocc) {
+    const isFixedPersistence = persClass === "fixed_cycle";
+    const isTightPersistence = persClass === "tight_duration";
+    if (
+      !isDeviceTiming
+      && !isTightTiming
+      && !isIsolatedCoocc
+      && !isAmbiguousCoocc
+      && !isFixedPersistence
+      && !isTightPersistence
+    ) {
       return nothing;
     }
-    // Combine tooltip text from whichever signals are present.
+    // Multi-line tooltip — each signal contributes one paragraph so
+    // the user sees the full evidence chain. Lit's title attribute
+    // renders \n\n as a real line break in most browsers.
     const reasons: string[] = [];
     if (t?.reason && (isDeviceTiming || isTightTiming)) reasons.push(t.reason);
     if (c?.reason && (isIsolatedCoocc || isAmbiguousCoocc)) reasons.push(c.reason);
+    if (p?.reason && (isFixedPersistence || isTightPersistence)) reasons.push(p.reason);
     const reason = reasons.join("\n\n") || "Likelihood analysis details unavailable";
-    // Worst-case classification wins on the pill text:
-    //   any device_likely → 🤖 device-managed (warning color)
-    //   any tight_pattern OR isolated context → 🤖 tight-pattern (info)
-    if (isDeviceTiming || (isIsolatedCoocc && isTightTiming)) {
+    // Severity escalation: any one strong device signal → "device-
+    // managed" (warning color). Two or more soft signals stacking
+    // also escalate. Otherwise tight-pattern (info color).
+    const strongSignals = (isDeviceTiming ? 1 : 0)
+      + (isIsolatedCoocc ? 1 : 0)
+      + (isFixedPersistence ? 1 : 0);
+    const softSignals = (isTightTiming ? 1 : 0)
+      + (isAmbiguousCoocc ? 1 : 0)
+      + (isTightPersistence ? 1 : 0);
+    const isDeviceManaged = strongSignals >= 1 || (strongSignals + softSignals) >= 3;
+    if (isDeviceManaged) {
       return html`<span
         class="pill"
         style="color: var(--warning-color, #ef6c00); background: rgba(239, 108, 0, 0.08);"
