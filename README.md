@@ -4,13 +4,15 @@ Lovelace card and sidebar panel for the [HA Insights](https://github.com/botts7/
 
 ## Status
 
-**v0.7.0** — full UX surface for the integration's v0.7 detector library and refine pipeline.
+**v1.2.23** — full UX surface for the integration's v1.5 detector + signal-grader library, audit, and refine pipelines.
 
 ### Card features
 - **Adaptive row count** — card auto-fits its row count to the available height (each ~72px). Set `max_rows` to disable, or `compact: true` for a single-line tile that deep-links to the panel.
 - **Visual editor** — native `<ha-form>` schema-driven config: title, min_confidence slider, max_rows, compact toggle, TTS target / engine entity pickers, search, sort, group.
 - **Per-row trust pill** — 🟢 local or 🟡 cloud at-a-glance reminder of where any LLM action would go.
 - **Confidence color pills** — green ≥0.8, amber ≥0.5, red below.
+- **🤖 device-managed pill** — surfaced when one or more of the four signal-grader libs (timing / co-occurrence / persistence / transition-entropy) classifies a pattern as device-driven rather than human routine. Tooltip explains which signal demoted the row (e.g. *"every previous-state duration lasts ~120 s with CV 0.0 % across 18 events — robotic precision"*). See the [integration's device-vs-human classification](https://github.com/botts7/ha-insights#device-vs-human-classification-v1535) for the maths.
+- **Filter chips** — Detector, Area, Floor, Integration, Label (HA 2024.4+), maturity tier, and a "Hide already-automated" toggle.
 - **Insight age** — "12m ago" / "yesterday" / "1w ago" in the row meta strip.
 - **Click-to-detail modal** — wide (900px max) with full automation YAML preview, scrollable.
 
@@ -21,6 +23,7 @@ Lovelace card and sidebar panel for the [HA Insights](https://github.com/botts7/
 - **🔥 Test actions** — fires the action block for real with per-action results panel.
 - **🔊 Read aloud** — TTS the explanation through a configurable media_player.
 - **Customize** — inline alias / description rename before Apply.
+- **📋 Preview deterministic fix** — for audit findings with an algorithmic fix (redundant_target, long_on_duration, trigger_time_drift), opens an IDE-style LCS-aligned side-by-side diff with zero LLM tokens. Apply commits via the existing validator + writer.
 
 ### Sidebar panel (`/ha-insights`)
 - **Search** — substring filter on insight title (case-insensitive).
@@ -83,8 +86,8 @@ The card depends entirely on the integration's privacy model. It never makes out
 
 ## Compatibility
 
-- Requires the [HA Insights integration](https://github.com/botts7/ha-insights) v0.7+ installed and configured.
-- HA 2025.4+.
+- Requires the [HA Insights integration](https://github.com/botts7/ha-insights) v1.5+ installed and configured. (Older v0.7–v1.4 integration installs work but won't surface audit findings, the device-managed pill, or filter chips for Floor / Integration / Label.)
+- HA 2025.6+ (label chips need HA 2024.4+ on the integration side).
 - Modern browsers (last two versions of Chrome / Firefox / Safari).
 
 ## License
