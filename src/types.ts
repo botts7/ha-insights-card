@@ -84,7 +84,7 @@ export interface Insight {
     external_source?: string | null;
   }>;
   /** v1.1: friendly group label shown when expanding the cohort,
-   * e.g. "binary_sensor.home_nvr_*" or "scene.evening_garden". */
+   * e.g. "binary_sensor.nvr_camera_*" or "scene.evening_garden". */
   cohort_label?: string | null;
   /** v1.2 Phase 5: registry-derived axes for filter chips + group_by.
    * `area_id` overrides the legacy top-level `area_id` (same value;
