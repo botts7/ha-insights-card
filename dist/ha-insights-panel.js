@@ -3185,6 +3185,7 @@ class HaInsightsCard extends i {
         const floorSet = new Set(this._config.floor_filter ?? []);
         const integSet = new Set(this._config.integration_filter ?? []);
         const labelSet = new Set(this._config.label_filter ?? []);
+        const hideAlreadyAutomated = this._config.hide_already_automated === true;
         const filtered = this._insights
             .filter((i) => i.confidence >= min)
             .filter((i) => !search || i.title.toLowerCase().includes(search))
@@ -3197,7 +3198,8 @@ class HaInsightsCard extends i {
             .filter((i) => integSet.size === 0 ||
             (i.integration != null && integSet.has(i.integration)))
             .filter((i) => labelSet.size === 0 ||
-            (Array.isArray(i.labels) && i.labels.some((l) => labelSet.has(l))));
+            (Array.isArray(i.labels) && i.labels.some((l) => labelSet.has(l))))
+            .filter((i) => !hideAlreadyAutomated || i.conflicts_with.length === 0);
         filtered.sort((a, b) => {
             if (sortBy === "age") {
                 // Newest first
@@ -3505,7 +3507,7 @@ class HaInsightsCard extends i {
         return b `
       <div class="row" @click=${() => this._openDialog(insight.id)}>
         <div class="row-title">
-          ${insight.title}
+          ${this._displayTitle(insight)}
           ${hasCohort
             ? b ` <button
                 class="pill-action"
@@ -3666,6 +3668,25 @@ class HaInsightsCard extends i {
         if (confidence >= 0.5)
             return "confidence-medium";
         return "confidence-low";
+    }
+    /** Rewrite the title for already-shadowed insights so it doesn't read
+     *  as a CTA. The detector emits "Pattern X. Automate this?" but when
+     *  conflict_scanner has already matched an existing automation, that
+     *  question is misleading — the answer is "no, you already did".
+     *
+     *  Server-side titles drive cohort-dedup grouping and notification
+     *  payloads, so this transform is presentation-only. The 🔁 pill +
+     *  conflicts_with_links still tell the full story.
+     *
+     *  Patterns stripped (case-insensitive trailing CTA):
+     *    - "Automate this?" / "Automate it?" / "Automate it" / "Automate."
+     *    - "Build automation?"
+     *    - "Auto-off after N min?"  ← long_tail also reads as a CTA
+     */
+    _displayTitle(insight) {
+        if (insight.conflicts_with.length === 0)
+            return insight.title;
+        return insight.title.replace(/\s*(?:Automate\s+(?:this|it)\??|Build\s+automation\??)\s*$/i, "").trim();
     }
     /** Render an "🔁 already automated" or "🤖 in N automations" pill.
      *
@@ -4595,7 +4616,7 @@ class HaInsightsCard extends i {
       <div class="dialog-backdrop" @click=${this._closeDialog}>
         <div class="dialog" @click=${(e) => e.stopPropagation()}>
           <div class="dialog-header">
-            <div class="dialog-title">${insight.title}</div>
+            <div class="dialog-title">${this._displayTitle(insight)}</div>
             <button
               class="dialog-close"
               aria-label="Close"
@@ -5019,6 +5040,13 @@ class HaInsightsPanel extends i {
         this._minConfidence = 0;
         this._sortBy = "confidence";
         this._groupBy = "none";
+        // v1.5.30: panel-side toggle for shadowed insights. We deliberately
+        // do NOT suppress these at scan time (a 1000-entity install reported
+        // 0 insights when we did — see detectors/__init__.py history-rich
+        // comment). The badge tells the user "HA noticed, you already did
+        // it"; this toggle lets a power user collapse those rows when they
+        // want to focus on net-new patterns. Default OFF (current behavior).
+        this._hideAlreadyAutomated = false;
         this._backfillBusy = false;
         this._bulkBusy = false;
         this._scanBusy = false;
@@ -5564,6 +5592,10 @@ class HaInsightsPanel extends i {
             if (Array.isArray(saved.filterLabels)) {
                 this._filterLabels = saved.filterLabels.filter((s) => typeof s === "string");
             }
+            // v1.5.30: hide-already-automated toggle
+            if (typeof saved.hideAlreadyAutomated === "boolean") {
+                this._hideAlreadyAutomated = saved.hideAlreadyAutomated;
+            }
             if (saved.auditDepth === "concise" || saved.auditDepth === "indepth") {
                 this._auditDepth = saved.auditDepth;
             }
@@ -5588,6 +5620,7 @@ class HaInsightsPanel extends i {
                 filterFloors: this._filterFloors,
                 filterIntegrations: this._filterIntegrations,
                 filterLabels: this._filterLabels,
+                hideAlreadyAutomated: this._hideAlreadyAutomated,
                 auditDepth: this._auditDepth,
             }));
         }
@@ -5608,6 +5641,7 @@ class HaInsightsPanel extends i {
             `${this._filterDeviceClasses.join(",")}|${this._filterDetectors.join(",")}|` +
             `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}|` +
             `${this._filterLabels.join(",")}|` +
+            `${this._hideAlreadyAutomated ? "1" : "0"}|` +
             `${this._auditDepth}`;
         if (this._cachedCardConfigKey !== key) {
             this._cachedCardConfigKey = key;
@@ -5630,6 +5664,7 @@ class HaInsightsPanel extends i {
                 floor_filter: this._filterFloors,
                 integration_filter: this._filterIntegrations,
                 label_filter: this._filterLabels,
+                hide_already_automated: this._hideAlreadyAutomated,
                 audit_depth: this._auditDepth,
             };
         }
@@ -6212,6 +6247,17 @@ class HaInsightsPanel extends i {
           <option value="concise">🤖 Concise (cheap)</option>
           <option value="indepth">🤖 In-depth (4× tokens)</option>
         </select>
+        <label
+          style="display:inline-flex; align-items:center; gap:6px; font-size:0.9em; cursor:pointer;"
+          title="Hide insights that the conflict scanner already marked as covered by an existing automation (🔁 already automated)."
+        >
+          <input
+            type="checkbox"
+            .checked=${this._hideAlreadyAutomated}
+            @change=${(e) => (this._hideAlreadyAutomated = e.target.checked)}
+          />
+          Hide 🔁 already automated
+        </label>
       </div>
       ${this._renderChipFilters()}
       <div class="filters" style="padding-top:0; padding-bottom:8px;">
@@ -6465,6 +6511,9 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_groupBy", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_hideAlreadyAutomated", void 0);
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_backfillBusy", void 0);

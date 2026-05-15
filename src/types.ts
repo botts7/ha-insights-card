@@ -260,6 +260,12 @@ export interface CardConfig {
   /** v1.5.28: filter by HA 2024.4+ label slug. Same shape as the
    *  others — empty / undefined means "no filter". */
   label_filter?: string[];
+  /** v1.5.30: hide insights that the conflict scanner already marked
+   *  as covered by an existing automation. Default false (current
+   *  behavior — shadowed rows are shown with a 🔁 pill). When true,
+   *  any insight with conflicts_with.length > 0 is filtered out
+   *  client-side, no extra WS calls. */
+  hide_already_automated?: boolean;
   /** v1.2.1: override the integration's audit_analysis_depth setting
    *  for 🤖 Suggest calls fired from this card. Undefined = inherit
    *  the OptionsFlow value (defaults to "concise"). */

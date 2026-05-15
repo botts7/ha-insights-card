@@ -3185,6 +3185,7 @@ class HaInsightsCard extends i {
         const floorSet = new Set(this._config.floor_filter ?? []);
         const integSet = new Set(this._config.integration_filter ?? []);
         const labelSet = new Set(this._config.label_filter ?? []);
+        const hideAlreadyAutomated = this._config.hide_already_automated === true;
         const filtered = this._insights
             .filter((i) => i.confidence >= min)
             .filter((i) => !search || i.title.toLowerCase().includes(search))
@@ -3197,7 +3198,8 @@ class HaInsightsCard extends i {
             .filter((i) => integSet.size === 0 ||
             (i.integration != null && integSet.has(i.integration)))
             .filter((i) => labelSet.size === 0 ||
-            (Array.isArray(i.labels) && i.labels.some((l) => labelSet.has(l))));
+            (Array.isArray(i.labels) && i.labels.some((l) => labelSet.has(l))))
+            .filter((i) => !hideAlreadyAutomated || i.conflicts_with.length === 0);
         filtered.sort((a, b) => {
             if (sortBy === "age") {
                 // Newest first
@@ -3505,7 +3507,7 @@ class HaInsightsCard extends i {
         return b `
       <div class="row" @click=${() => this._openDialog(insight.id)}>
         <div class="row-title">
-          ${insight.title}
+          ${this._displayTitle(insight)}
           ${hasCohort
             ? b ` <button
                 class="pill-action"
@@ -3666,6 +3668,25 @@ class HaInsightsCard extends i {
         if (confidence >= 0.5)
             return "confidence-medium";
         return "confidence-low";
+    }
+    /** Rewrite the title for already-shadowed insights so it doesn't read
+     *  as a CTA. The detector emits "Pattern X. Automate this?" but when
+     *  conflict_scanner has already matched an existing automation, that
+     *  question is misleading — the answer is "no, you already did".
+     *
+     *  Server-side titles drive cohort-dedup grouping and notification
+     *  payloads, so this transform is presentation-only. The 🔁 pill +
+     *  conflicts_with_links still tell the full story.
+     *
+     *  Patterns stripped (case-insensitive trailing CTA):
+     *    - "Automate this?" / "Automate it?" / "Automate it" / "Automate."
+     *    - "Build automation?"
+     *    - "Auto-off after N min?"  ← long_tail also reads as a CTA
+     */
+    _displayTitle(insight) {
+        if (insight.conflicts_with.length === 0)
+            return insight.title;
+        return insight.title.replace(/\s*(?:Automate\s+(?:this|it)\??|Build\s+automation\??)\s*$/i, "").trim();
     }
     /** Render an "🔁 already automated" or "🤖 in N automations" pill.
      *
@@ -4595,7 +4616,7 @@ class HaInsightsCard extends i {
       <div class="dialog-backdrop" @click=${this._closeDialog}>
         <div class="dialog" @click=${(e) => e.stopPropagation()}>
           <div class="dialog-header">
-            <div class="dialog-title">${insight.title}</div>
+            <div class="dialog-title">${this._displayTitle(insight)}</div>
             <button
               class="dialog-close"
               aria-label="Close"

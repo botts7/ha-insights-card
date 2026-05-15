@@ -36,6 +36,13 @@ export class HaInsightsPanel extends LitElement {
     | "detector"
     | "label"
     | "none" = "none";
+  // v1.5.30: panel-side toggle for shadowed insights. We deliberately
+  // do NOT suppress these at scan time (a 1000-entity install reported
+  // 0 insights when we did — see detectors/__init__.py history-rich
+  // comment). The badge tells the user "HA noticed, you already did
+  // it"; this toggle lets a power user collapse those rows when they
+  // want to focus on net-new patterns. Default OFF (current behavior).
+  @state() private _hideAlreadyAutomated = false;
   @state() private _backfillBusy = false;
   @state() private _bulkBusy = false;
   @state() private _scanBusy = false;
@@ -626,6 +633,10 @@ export class HaInsightsPanel extends LitElement {
           (s: unknown): s is string => typeof s === "string",
         );
       }
+      // v1.5.30: hide-already-automated toggle
+      if (typeof saved.hideAlreadyAutomated === "boolean") {
+        this._hideAlreadyAutomated = saved.hideAlreadyAutomated;
+      }
       if (saved.auditDepth === "concise" || saved.auditDepth === "indepth") {
         this._auditDepth = saved.auditDepth;
       }
@@ -652,6 +663,7 @@ export class HaInsightsPanel extends LitElement {
           filterFloors: this._filterFloors,
           filterIntegrations: this._filterIntegrations,
           filterLabels: this._filterLabels,
+          hideAlreadyAutomated: this._hideAlreadyAutomated,
           auditDepth: this._auditDepth,
         }),
       );
@@ -681,6 +693,7 @@ export class HaInsightsPanel extends LitElement {
       `${this._filterDeviceClasses.join(",")}|${this._filterDetectors.join(",")}|` +
       `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}|` +
       `${this._filterLabels.join(",")}|` +
+      `${this._hideAlreadyAutomated ? "1" : "0"}|` +
       `${this._auditDepth}`;
     if (this._cachedCardConfigKey !== key) {
       this._cachedCardConfigKey = key;
@@ -703,6 +716,7 @@ export class HaInsightsPanel extends LitElement {
         floor_filter: this._filterFloors,
         integration_filter: this._filterIntegrations,
         label_filter: this._filterLabels,
+        hide_already_automated: this._hideAlreadyAutomated,
         audit_depth: this._auditDepth,
       };
     }
@@ -1334,6 +1348,18 @@ export class HaInsightsPanel extends LitElement {
           <option value="concise">🤖 Concise (cheap)</option>
           <option value="indepth">🤖 In-depth (4× tokens)</option>
         </select>
+        <label
+          style="display:inline-flex; align-items:center; gap:6px; font-size:0.9em; cursor:pointer;"
+          title="Hide insights that the conflict scanner already marked as covered by an existing automation (🔁 already automated)."
+        >
+          <input
+            type="checkbox"
+            .checked=${this._hideAlreadyAutomated}
+            @change=${(e: Event) =>
+              (this._hideAlreadyAutomated = (e.target as HTMLInputElement).checked)}
+          />
+          Hide 🔁 already automated
+        </label>
       </div>
       ${this._renderChipFilters()}
       <div class="filters" style="padding-top:0; padding-bottom:8px;">
