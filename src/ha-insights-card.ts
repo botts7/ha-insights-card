@@ -2466,18 +2466,28 @@ export class HaInsightsCard extends LitElement {
     `;
   }
 
-  /** v1.2.16 — drop top-level keys prefixed with `_`. Detectors stash
-   *  internal metadata under `_manual_habit`, `_audit`, etc. — useful
-   *  for cohort dedup + fingerprinting but invisible to the user
-   *  when they open automations.yaml. Strip from the displayed YAML
-   *  to match. Returns a shallow copy; caller's object is untouched. */
+  /** v1.2.16 — drop top-level keys prefixed with `_` from the YAML
+   *  preview. Detectors stash internal metadata under `_manual_habit`,
+   *  `_audit`, `_streak`, etc. — useful for cohort dedup + fingerprinting
+   *  but invisible to the user when they open automations.yaml.
+   *  Returns a shallow copy; caller's object is untouched.
+   *
+   *  v1.2.20: keep `_*_assessment` keys visible. Those carry the
+   *  v1.5.35+ grader output (timing / cooccurrence / persistence) and
+   *  are the transparency layer users need to understand WHY their
+   *  confidence is what it is. The server-side automation_writer
+   *  (v1.5.34) strips them before write, so they never reach
+   *  automations.yaml regardless of what's in the preview.
+   */
   private _stripPrivateKeys(
     payload: Record<string, unknown> | undefined,
   ): Record<string, unknown> {
     if (!payload || typeof payload !== "object") return {};
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(payload)) {
-      if (!k.startsWith("_")) out[k] = v;
+      if (!k.startsWith("_") || k.endsWith("_assessment")) {
+        out[k] = v;
+      }
     }
     return out;
   }
