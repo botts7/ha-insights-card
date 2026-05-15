@@ -4708,8 +4708,16 @@ class HaInsightsCard extends i {
         }[tier] ?? { emoji: "⚪", label: tier, cls: "" };
         const scenarios = Array.isArray(step.scenarios) ? step.scenarios : [];
         const showScenarios = tier !== "GREAT" && scenarios.length > 0;
+        const signals = Array.isArray(step.signals) ? step.signals : [];
         const hasUrl = !!step.setup_url;
         const external = !!step.setup_url_external;
+        // v1.2.15: setup URL is shown at every tier — including GREAT —
+        // so users can verify or revisit the underlying config (Companion
+        // App page, /config/devices etc). Pre-v1.2.15 the link was hidden
+        // when tier === "GREAT", leaving the user with "Working great" and
+        // no way to inspect WHAT was working. Same URL, different
+        // call-to-action verb per tier.
+        const linkVerb = tier === "GREAT" ? "Manage" : (step.setup_url_label ?? "Set this up");
         return b `
       <div class="setup-step setup-step--${tierBadge.cls}">
         <div class="setup-step-header">
@@ -4721,6 +4729,16 @@ class HaInsightsCard extends i {
         ${step.advice
             ? b `<div class="setup-step-advice">${step.advice}</div>`
             : A}
+        ${signals.length > 0
+            ? b `
+              <details class="setup-step-signals" ?open=${tier === "GREAT"}>
+                <summary>Detected signals (${signals.length})</summary>
+                <ul>
+                  ${signals.map((s) => b `<li>${s}</li>`)}
+                </ul>
+              </details>
+            `
+            : A}
         ${showScenarios
             ? b `
               <details class="setup-step-scenarios">
@@ -4731,24 +4749,24 @@ class HaInsightsCard extends i {
               </details>
             `
             : A}
-        ${tier !== "GREAT" && hasUrl
+        ${hasUrl
             ? external
                 ? b `
                 <div class="setup-step-action">
                   <a
-                    class="action primary"
+                    class="action ${tier === "GREAT" ? "" : "primary"}"
                     href=${step.setup_url}
                     target="_blank"
                     rel="noopener"
-                  >${step.setup_url_label ?? "Set this up"} ↗</a>
+                  >${linkVerb} ↗</a>
                 </div>
               `
                 : b `
                 <div class="setup-step-action">
                   <a
-                    class="action primary"
+                    class="action ${tier === "GREAT" ? "" : "primary"}"
                     href=${step.setup_url}
-                  >${step.setup_url_label ?? "Set this up"} →</a>
+                  >${linkVerb} →</a>
                 </div>
               `
             : tier !== "GREAT" && step.next_step
