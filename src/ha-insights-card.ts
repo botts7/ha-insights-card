@@ -712,6 +712,133 @@ export class HaInsightsCard extends LitElement {
       gap: 10px;
       margin-top: 8px;
     }
+    /* v1.2.16 — audit dialog body components */
+    .audit-automation-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: var(--secondary-background-color, #f5f5f5);
+      border-radius: 6px;
+    }
+    .audit-automation-name {
+      font-weight: 500;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .audit-advice {
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: var(--info-color-background, rgba(33, 150, 243, 0.08));
+      border-left: 3px solid var(--info-color, #2196f3);
+      border-radius: 4px;
+      font-size: 0.92em;
+      color: var(--primary-text-color);
+    }
+    .audit-findings {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .audit-finding {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 8px 0;
+      border-top: 1px solid var(--divider-color, #e0e0e0);
+    }
+    .audit-finding:first-child {
+      border-top: none;
+    }
+    .audit-finding-icon {
+      flex: 0 0 auto;
+      font-size: 1.1em;
+      line-height: 1.3;
+    }
+    .audit-finding-text {
+      flex: 1;
+      line-height: 1.35;
+    }
+    .audit-finding-action {
+      flex: 0 0 auto;
+      font-size: 0.85em;
+      color: var(--primary-color, #4c6ef5);
+      text-decoration: none;
+      white-space: nowrap;
+      align-self: center;
+    }
+    .audit-finding-action:hover {
+      text-decoration: underline;
+    }
+    .audit-entity-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 600px) {
+      .audit-entity-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .audit-entity-label {
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+    .audit-entity-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .audit-entity-pill {
+      padding: 3px 8px;
+      background: var(--secondary-background-color, #f5f5f5);
+      border-radius: 12px;
+      font-size: 0.85em;
+      font-family: var(--code-font-family, monospace);
+    }
+    .audit-entity-pill.is-silent {
+      background: rgba(244, 67, 54, 0.08);
+      color: var(--error-color, #c62828);
+    }
+    .audit-entity-pill .silent-dot {
+      color: var(--error-color, #c62828);
+    }
+    .audit-related {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .audit-related-link {
+      color: var(--primary-color, #4c6ef5);
+      text-decoration: none;
+      font-size: 0.92em;
+    }
+    .audit-related-link:hover {
+      text-decoration: underline;
+    }
+    .audit-raw-payload {
+      margin-top: 16px;
+    }
+    .audit-raw-payload summary {
+      cursor: pointer;
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+    }
+    .audit-raw-payload pre {
+      max-height: 240px;
+      overflow: auto;
+      font-size: 0.78em;
+      background: var(--code-editor-background-color, var(--secondary-background-color, #f5f5f5));
+      padding: 8px;
+      border-radius: 4px;
+      margin-top: 6px;
+    }
     .setup-step {
       border: 1px solid var(--divider-color, #e0e0e0);
       border-left: 4px solid var(--divider-color, #e0e0e0);
@@ -2304,7 +2431,14 @@ export class HaInsightsCard extends LitElement {
     const editing = this._editingPayloadFor.has(insight.id);
     const draft = this._payloadEditsById.get(insight.id);
     const parseError = this._payloadParseErrorById.get(insight.id);
-    const view = basePayload ?? insight.payload;
+    const rawView = basePayload ?? insight.payload;
+    // v1.2.16: strip private detector metadata (underscore-prefixed
+    // keys like _manual_habit, _audit) from the YAML preview so the
+    // user sees what will actually be written to automations.yaml,
+    // not an extra blob of "what does this even mean" detector
+    // bookkeeping. The server-side writer (v1.5.34) strips the same
+    // keys before write — this is the visual equivalent.
+    const view = this._stripPrivateKeys(rawView);
     return html`
       <div class="payload-edit">
         <button
@@ -2330,6 +2464,22 @@ export class HaInsightsCard extends LitElement {
           `
         : html`<pre>${JSON.stringify(view, null, 2)}</pre>`}
     `;
+  }
+
+  /** v1.2.16 — drop top-level keys prefixed with `_`. Detectors stash
+   *  internal metadata under `_manual_habit`, `_audit`, etc. — useful
+   *  for cohort dedup + fingerprinting but invisible to the user
+   *  when they open automations.yaml. Strip from the displayed YAML
+   *  to match. Returns a shallow copy; caller's object is untouched. */
+  private _stripPrivateKeys(
+    payload: Record<string, unknown> | undefined,
+  ): Record<string, unknown> {
+    if (!payload || typeof payload !== "object") return {};
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(payload)) {
+      if (!k.startsWith("_")) out[k] = v;
+    }
+    return out;
   }
 
   private _renderModalError(): TemplateResult | typeof nothing {
@@ -3935,6 +4085,258 @@ export class HaInsightsCard extends LitElement {
     `;
   }
 
+  /** v1.2.16 — Dedicated dialog body for automation_audit insights.
+   *
+   *  Pre-v1.2.16 audit insights shared the generic Refine-flow body,
+   *  which:
+   *    - Surfaced raw JSON payload front and center (the user has no
+   *      use for the internal observation list shape).
+   *    - Showed a Customize block (Alias / Description / "Notes for
+   *      the LLM") that renames the *insight* — meaningless for an
+   *      audit observation that already names an automation by alias.
+   *    - Buried 🤖 Suggest improvements at the bottom and offered no
+   *      direct link to the automation it was complaining about.
+   *
+   *  v1.2.16 renders observations as a structured list with per-kind
+   *  icons + actions, promotes 🤖 Suggest as the primary CTA, and
+   *  exposes a deeplink to /config/automation/edit/{automation_id}
+   *  for the "fix it manually" path. Raw payload moves behind a
+   *  <details> disclosure for power users. Apply ─ which is a no-op
+   *  for an observation-only audit ─ is hidden entirely. */
+  private _renderAuditBody(insight: Insight): TemplateResult {
+    const busy = this._busyId === insight.id || this._auditSuggestBusy === insight.id;
+    const confidencePct = Math.round(insight.confidence * 100);
+    const payload = (insight.payload ?? {}) as Record<string, unknown>;
+    const automationAlias = (payload.automation_alias as string | undefined) ?? "";
+    const automationId = (payload.automation_id as string | undefined) ?? "";
+    const advice = (payload.advice as string | undefined) ?? "";
+    type Observation = {
+      kind: string;
+      text: string;
+      confidence?: number;
+      metrics?: Record<string, unknown>;
+    };
+    const observations: Observation[] = Array.isArray(payload.observations)
+      ? (payload.observations as Observation[]).filter(
+          (o): o is Observation => typeof o === "object" && o !== null,
+        )
+      : [];
+    const targetEntities = Array.isArray(payload.target_entities)
+      ? (payload.target_entities as unknown[]).filter(
+          (e): e is string => typeof e === "string",
+        )
+      : [];
+    const triggerEntities = Array.isArray(payload.trigger_entities)
+      ? (payload.trigger_entities as unknown[]).filter(
+          (e): e is string => typeof e === "string",
+        )
+      : [];
+    const relatedIds = Array.isArray(payload.related_insight_ids)
+      ? (payload.related_insight_ids as unknown[]).filter(
+          (s): s is string => typeof s === "string",
+        )
+      : [];
+    // entity_ids the audit has flagged as missing/silent so we can
+    // mark them on the entity-pill list. Dedup'd Set lookup keeps
+    // the per-pill check O(1).
+    const silentEntities = new Set<string>();
+    for (const o of observations) {
+      if (
+        o.kind === "entity_silent"
+        && o.metrics
+        && typeof o.metrics.entity_id === "string"
+      ) {
+        silentEntities.add(o.metrics.entity_id);
+      }
+    }
+    const editorUrl = automationId
+      ? `/config/automation/edit/${automationId}`
+      : "";
+    return html`
+      <div class="dialog-body audit-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">automation_audit</span>
+          ${insight.maturity === "beta"
+            ? html`<span class="pill" style="color: var(--warning-color)">🟡 BETA</span>`
+            : nothing}
+        </div>
+        ${automationAlias
+          ? html`
+              <div class="audit-automation-header">
+                <div class="audit-automation-name">${automationAlias}</div>
+                ${editorUrl
+                  ? html`<a
+                      class="action primary"
+                      href=${editorUrl}
+                      target="_top"
+                      title="Jump straight to this automation in HA's editor — fix it manually here"
+                    >Open in editor →</a>`
+                  : nothing}
+              </div>
+            `
+          : nothing}
+        ${advice
+          ? html`<div class="audit-advice">${advice}</div>`
+          : nothing}
+        ${observations.length > 0
+          ? html`
+              <h4 style="margin: 16px 0 4px 0;">
+                Findings (${observations.length})
+              </h4>
+              <ul class="audit-findings">
+                ${observations.map((o) => this._renderAuditFinding(o))}
+              </ul>
+            `
+          : nothing}
+        ${triggerEntities.length > 0 || targetEntities.length > 0
+          ? html`
+              <h4 style="margin: 16px 0 4px 0;">Entities</h4>
+              <div class="audit-entity-grid">
+                ${triggerEntities.length > 0
+                  ? html`
+                      <div>
+                        <div class="audit-entity-label">Trigger</div>
+                        <div class="audit-entity-pills">
+                          ${triggerEntities.map(
+                            (e) => this._renderAuditEntityPill(e, silentEntities.has(e)),
+                          )}
+                        </div>
+                      </div>
+                    `
+                  : nothing}
+                ${targetEntities.length > 0
+                  ? html`
+                      <div>
+                        <div class="audit-entity-label">Target</div>
+                        <div class="audit-entity-pills">
+                          ${targetEntities.map(
+                            (e) => this._renderAuditEntityPill(e, silentEntities.has(e)),
+                          )}
+                        </div>
+                      </div>
+                    `
+                  : nothing}
+              </div>
+            `
+          : nothing}
+        ${relatedIds.length > 0
+          ? html`
+              <h4 style="margin: 16px 0 4px 0;">
+                Related insights (${relatedIds.length})
+              </h4>
+              <div class="audit-related">
+                ${relatedIds.map((id) => {
+                  const related = this._insights.find((i) => i.id === id);
+                  const label = related
+                    ? this._displayTitle(related)
+                    : `<${id.slice(0, 12)}…>`;
+                  return html`
+                    <a
+                      class="audit-related-link"
+                      href="#"
+                      @click=${(e: Event) => {
+                        e.preventDefault();
+                        if (related) this._openDialog(related.id);
+                      }}
+                    >${label}</a>
+                  `;
+                })}
+              </div>
+            `
+          : nothing}
+        ${insight.explanation
+          ? html`<div class="explanation">${insight.explanation}</div>`
+          : nothing}
+        <details class="audit-raw-payload">
+          <summary>Show raw payload</summary>
+          <pre class="payload-code">${JSON.stringify(insight.payload, null, 2)}</pre>
+        </details>
+      </div>
+      <div class="dialog-footer">
+        <button
+          class="action primary"
+          ?disabled=${busy}
+          @click=${() => this._runAuditSuggest(insight)}
+          title="Ask the LLM for specific YAML edits to fix these findings"
+        >${this._auditSuggestBusy === insight.id
+          ? "Thinking…"
+          : "🤖 Suggest improvements"}</button>
+        <button
+          class="action"
+          ?disabled=${busy}
+          @click=${() => this._dismiss(insight)}
+        >Dismiss</button>
+        <button
+          class="action"
+          ?disabled=${busy}
+          @click=${() => this._snooze(insight)}
+        >Snooze 7d</button>
+      </div>
+    `;
+  }
+
+  /** One audit observation row. Kind-aware icon + a context action
+   *  (entity link / scroll to editor / linked insight) so the user
+   *  can act on each finding without leaving the dialog. */
+  private _renderAuditFinding(o: {
+    kind: string;
+    text: string;
+    metrics?: Record<string, unknown>;
+  }): TemplateResult {
+    const kindIcons: Record<string, string> = {
+      entity_silent: "🔴",
+      redundant_target: "🔁",
+      long_on_duration: "⏱️",
+      trigger_time_drift: "🕒",
+      trace_dormant: "💤",
+      trace_condition_blocks: "🚧",
+      trace_action_errors: "❗",
+      has_recent_insights: "📌",
+      rollup_dow: "📅",
+      rollup_dom: "📆",
+      rollup_month: "🗓️",
+      entity_stale_state: "🥶",
+      cross_integration_coupling: "🌩️",
+    };
+    const icon = kindIcons[o.kind] ?? "•";
+    const eid = typeof o.metrics?.entity_id === "string" ? o.metrics.entity_id as string : "";
+    // Per-kind context action — small inline link so the user can act
+    // on this specific finding without leaving the dialog.
+    let action: TemplateResult | typeof nothing = nothing;
+    if (o.kind === "entity_silent" && eid) {
+      const url = `/config/entities?config_entry=&domain=&q=${encodeURIComponent(eid)}`;
+      action = html`
+        <a
+          class="audit-finding-action"
+          href=${url}
+          target="_top"
+          title="Open Entity Registry filtered to '${eid}' so you can rename, remove, or replace it"
+        >Open entity →</a>
+      `;
+    }
+    return html`
+      <li class="audit-finding audit-finding--${o.kind}">
+        <span class="audit-finding-icon">${icon}</span>
+        <span class="audit-finding-text">${o.text}</span>
+        ${action}
+      </li>
+    `;
+  }
+
+  /** Compact pill for an entity_id under Trigger / Target. The silent
+   *  flag adds a red dot so the user spots the offending entity at a
+   *  glance without scanning the findings list. */
+  private _renderAuditEntityPill(eid: string, silent: boolean): TemplateResult {
+    return html`
+      <span class="audit-entity-pill ${silent ? "is-silent" : ""}">
+        ${silent ? html`<span class="silent-dot" title="Flagged silent / missing">●</span> ` : nothing}
+        ${eid}
+      </span>
+    `;
+  }
+
   private _renderSetupStep(step: {
     feature?: string;
     feature_key?: string;
@@ -4068,7 +4470,10 @@ export class HaInsightsCard extends LitElement {
               </div>`
             : insight.detector === "setup_quality"
               ? this._renderSetupGuideBody(insight)
-              : html`
+              : insight.detector === "automation_audit"
+                && insight.payload_format !== "automation"
+                ? this._renderAuditBody(insight)
+                : html`
                 <div class="dialog-body">
                   ${this._renderModalError()}
                   ${this._renderTestResults()}

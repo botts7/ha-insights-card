@@ -1778,6 +1778,133 @@ class HaInsightsCard extends i {
       gap: 10px;
       margin-top: 8px;
     }
+    /* v1.2.16 — audit dialog body components */
+    .audit-automation-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: var(--secondary-background-color, #f5f5f5);
+      border-radius: 6px;
+    }
+    .audit-automation-name {
+      font-weight: 500;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .audit-advice {
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: var(--info-color-background, rgba(33, 150, 243, 0.08));
+      border-left: 3px solid var(--info-color, #2196f3);
+      border-radius: 4px;
+      font-size: 0.92em;
+      color: var(--primary-text-color);
+    }
+    .audit-findings {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .audit-finding {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 8px 0;
+      border-top: 1px solid var(--divider-color, #e0e0e0);
+    }
+    .audit-finding:first-child {
+      border-top: none;
+    }
+    .audit-finding-icon {
+      flex: 0 0 auto;
+      font-size: 1.1em;
+      line-height: 1.3;
+    }
+    .audit-finding-text {
+      flex: 1;
+      line-height: 1.35;
+    }
+    .audit-finding-action {
+      flex: 0 0 auto;
+      font-size: 0.85em;
+      color: var(--primary-color, #4c6ef5);
+      text-decoration: none;
+      white-space: nowrap;
+      align-self: center;
+    }
+    .audit-finding-action:hover {
+      text-decoration: underline;
+    }
+    .audit-entity-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 600px) {
+      .audit-entity-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .audit-entity-label {
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+    .audit-entity-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .audit-entity-pill {
+      padding: 3px 8px;
+      background: var(--secondary-background-color, #f5f5f5);
+      border-radius: 12px;
+      font-size: 0.85em;
+      font-family: var(--code-font-family, monospace);
+    }
+    .audit-entity-pill.is-silent {
+      background: rgba(244, 67, 54, 0.08);
+      color: var(--error-color, #c62828);
+    }
+    .audit-entity-pill .silent-dot {
+      color: var(--error-color, #c62828);
+    }
+    .audit-related {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .audit-related-link {
+      color: var(--primary-color, #4c6ef5);
+      text-decoration: none;
+      font-size: 0.92em;
+    }
+    .audit-related-link:hover {
+      text-decoration: underline;
+    }
+    .audit-raw-payload {
+      margin-top: 16px;
+    }
+    .audit-raw-payload summary {
+      cursor: pointer;
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+    }
+    .audit-raw-payload pre {
+      max-height: 240px;
+      overflow: auto;
+      font-size: 0.78em;
+      background: var(--code-editor-background-color, var(--secondary-background-color, #f5f5f5));
+      padding: 8px;
+      border-radius: 4px;
+      margin-top: 6px;
+    }
     .setup-step {
       border: 1px solid var(--divider-color, #e0e0e0);
       border-left: 4px solid var(--divider-color, #e0e0e0);
@@ -3205,7 +3332,14 @@ class HaInsightsCard extends i {
         const editing = this._editingPayloadFor.has(insight.id);
         const draft = this._payloadEditsById.get(insight.id);
         const parseError = this._payloadParseErrorById.get(insight.id);
-        const view = basePayload ?? insight.payload;
+        const rawView = basePayload ?? insight.payload;
+        // v1.2.16: strip private detector metadata (underscore-prefixed
+        // keys like _manual_habit, _audit) from the YAML preview so the
+        // user sees what will actually be written to automations.yaml,
+        // not an extra blob of "what does this even mean" detector
+        // bookkeeping. The server-side writer (v1.5.34) strips the same
+        // keys before write — this is the visual equivalent.
+        const view = this._stripPrivateKeys(rawView);
         return b `
       <div class="payload-edit">
         <button
@@ -3231,6 +3365,21 @@ class HaInsightsCard extends i {
           `
             : b `<pre>${JSON.stringify(view, null, 2)}</pre>`}
     `;
+    }
+    /** v1.2.16 — drop top-level keys prefixed with `_`. Detectors stash
+     *  internal metadata under `_manual_habit`, `_audit`, etc. — useful
+     *  for cohort dedup + fingerprinting but invisible to the user
+     *  when they open automations.yaml. Strip from the displayed YAML
+     *  to match. Returns a shallow copy; caller's object is untouched. */
+    _stripPrivateKeys(payload) {
+        if (!payload || typeof payload !== "object")
+            return {};
+        const out = {};
+        for (const [k, v] of Object.entries(payload)) {
+            if (!k.startsWith("_"))
+                out[k] = v;
+        }
+        return out;
     }
     _renderModalError() {
         if (!this._modalError)
@@ -4698,6 +4847,232 @@ class HaInsightsCard extends i {
       </div>
     `;
     }
+    /** v1.2.16 — Dedicated dialog body for automation_audit insights.
+     *
+     *  Pre-v1.2.16 audit insights shared the generic Refine-flow body,
+     *  which:
+     *    - Surfaced raw JSON payload front and center (the user has no
+     *      use for the internal observation list shape).
+     *    - Showed a Customize block (Alias / Description / "Notes for
+     *      the LLM") that renames the *insight* — meaningless for an
+     *      audit observation that already names an automation by alias.
+     *    - Buried 🤖 Suggest improvements at the bottom and offered no
+     *      direct link to the automation it was complaining about.
+     *
+     *  v1.2.16 renders observations as a structured list with per-kind
+     *  icons + actions, promotes 🤖 Suggest as the primary CTA, and
+     *  exposes a deeplink to /config/automation/edit/{automation_id}
+     *  for the "fix it manually" path. Raw payload moves behind a
+     *  <details> disclosure for power users. Apply ─ which is a no-op
+     *  for an observation-only audit ─ is hidden entirely. */
+    _renderAuditBody(insight) {
+        const busy = this._busyId === insight.id || this._auditSuggestBusy === insight.id;
+        const confidencePct = Math.round(insight.confidence * 100);
+        const payload = (insight.payload ?? {});
+        const automationAlias = payload.automation_alias ?? "";
+        const automationId = payload.automation_id ?? "";
+        const advice = payload.advice ?? "";
+        const observations = Array.isArray(payload.observations)
+            ? payload.observations.filter((o) => typeof o === "object" && o !== null)
+            : [];
+        const targetEntities = Array.isArray(payload.target_entities)
+            ? payload.target_entities.filter((e) => typeof e === "string")
+            : [];
+        const triggerEntities = Array.isArray(payload.trigger_entities)
+            ? payload.trigger_entities.filter((e) => typeof e === "string")
+            : [];
+        const relatedIds = Array.isArray(payload.related_insight_ids)
+            ? payload.related_insight_ids.filter((s) => typeof s === "string")
+            : [];
+        // entity_ids the audit has flagged as missing/silent so we can
+        // mark them on the entity-pill list. Dedup'd Set lookup keeps
+        // the per-pill check O(1).
+        const silentEntities = new Set();
+        for (const o of observations) {
+            if (o.kind === "entity_silent"
+                && o.metrics
+                && typeof o.metrics.entity_id === "string") {
+                silentEntities.add(o.metrics.entity_id);
+            }
+        }
+        const editorUrl = automationId
+            ? `/config/automation/edit/${automationId}`
+            : "";
+        return b `
+      <div class="dialog-body audit-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">automation_audit</span>
+          ${insight.maturity === "beta"
+            ? b `<span class="pill" style="color: var(--warning-color)">🟡 BETA</span>`
+            : A}
+        </div>
+        ${automationAlias
+            ? b `
+              <div class="audit-automation-header">
+                <div class="audit-automation-name">${automationAlias}</div>
+                ${editorUrl
+                ? b `<a
+                      class="action primary"
+                      href=${editorUrl}
+                      target="_top"
+                      title="Jump straight to this automation in HA's editor — fix it manually here"
+                    >Open in editor →</a>`
+                : A}
+              </div>
+            `
+            : A}
+        ${advice
+            ? b `<div class="audit-advice">${advice}</div>`
+            : A}
+        ${observations.length > 0
+            ? b `
+              <h4 style="margin: 16px 0 4px 0;">
+                Findings (${observations.length})
+              </h4>
+              <ul class="audit-findings">
+                ${observations.map((o) => this._renderAuditFinding(o))}
+              </ul>
+            `
+            : A}
+        ${triggerEntities.length > 0 || targetEntities.length > 0
+            ? b `
+              <h4 style="margin: 16px 0 4px 0;">Entities</h4>
+              <div class="audit-entity-grid">
+                ${triggerEntities.length > 0
+                ? b `
+                      <div>
+                        <div class="audit-entity-label">Trigger</div>
+                        <div class="audit-entity-pills">
+                          ${triggerEntities.map((e) => this._renderAuditEntityPill(e, silentEntities.has(e)))}
+                        </div>
+                      </div>
+                    `
+                : A}
+                ${targetEntities.length > 0
+                ? b `
+                      <div>
+                        <div class="audit-entity-label">Target</div>
+                        <div class="audit-entity-pills">
+                          ${targetEntities.map((e) => this._renderAuditEntityPill(e, silentEntities.has(e)))}
+                        </div>
+                      </div>
+                    `
+                : A}
+              </div>
+            `
+            : A}
+        ${relatedIds.length > 0
+            ? b `
+              <h4 style="margin: 16px 0 4px 0;">
+                Related insights (${relatedIds.length})
+              </h4>
+              <div class="audit-related">
+                ${relatedIds.map((id) => {
+                const related = this._insights.find((i) => i.id === id);
+                const label = related
+                    ? this._displayTitle(related)
+                    : `<${id.slice(0, 12)}…>`;
+                return b `
+                    <a
+                      class="audit-related-link"
+                      href="#"
+                      @click=${(e) => {
+                    e.preventDefault();
+                    if (related)
+                        this._openDialog(related.id);
+                }}
+                    >${label}</a>
+                  `;
+            })}
+              </div>
+            `
+            : A}
+        ${insight.explanation
+            ? b `<div class="explanation">${insight.explanation}</div>`
+            : A}
+        <details class="audit-raw-payload">
+          <summary>Show raw payload</summary>
+          <pre class="payload-code">${JSON.stringify(insight.payload, null, 2)}</pre>
+        </details>
+      </div>
+      <div class="dialog-footer">
+        <button
+          class="action primary"
+          ?disabled=${busy}
+          @click=${() => this._runAuditSuggest(insight)}
+          title="Ask the LLM for specific YAML edits to fix these findings"
+        >${this._auditSuggestBusy === insight.id
+            ? "Thinking…"
+            : "🤖 Suggest improvements"}</button>
+        <button
+          class="action"
+          ?disabled=${busy}
+          @click=${() => this._dismiss(insight)}
+        >Dismiss</button>
+        <button
+          class="action"
+          ?disabled=${busy}
+          @click=${() => this._snooze(insight)}
+        >Snooze 7d</button>
+      </div>
+    `;
+    }
+    /** One audit observation row. Kind-aware icon + a context action
+     *  (entity link / scroll to editor / linked insight) so the user
+     *  can act on each finding without leaving the dialog. */
+    _renderAuditFinding(o) {
+        const kindIcons = {
+            entity_silent: "🔴",
+            redundant_target: "🔁",
+            long_on_duration: "⏱️",
+            trigger_time_drift: "🕒",
+            trace_dormant: "💤",
+            trace_condition_blocks: "🚧",
+            trace_action_errors: "❗",
+            has_recent_insights: "📌",
+            rollup_dow: "📅",
+            rollup_dom: "📆",
+            rollup_month: "🗓️",
+            entity_stale_state: "🥶",
+            cross_integration_coupling: "🌩️",
+        };
+        const icon = kindIcons[o.kind] ?? "•";
+        const eid = typeof o.metrics?.entity_id === "string" ? o.metrics.entity_id : "";
+        // Per-kind context action — small inline link so the user can act
+        // on this specific finding without leaving the dialog.
+        let action = A;
+        if (o.kind === "entity_silent" && eid) {
+            const url = `/config/entities?config_entry=&domain=&q=${encodeURIComponent(eid)}`;
+            action = b `
+        <a
+          class="audit-finding-action"
+          href=${url}
+          target="_top"
+          title="Open Entity Registry filtered to '${eid}' so you can rename, remove, or replace it"
+        >Open entity →</a>
+      `;
+        }
+        return b `
+      <li class="audit-finding audit-finding--${o.kind}">
+        <span class="audit-finding-icon">${icon}</span>
+        <span class="audit-finding-text">${o.text}</span>
+        ${action}
+      </li>
+    `;
+    }
+    /** Compact pill for an entity_id under Trigger / Target. The silent
+     *  flag adds a red dot so the user spots the offending entity at a
+     *  glance without scanning the findings list. */
+    _renderAuditEntityPill(eid, silent) {
+        return b `
+      <span class="audit-entity-pill ${silent ? "is-silent" : ""}">
+        ${silent ? b `<span class="silent-dot" title="Flagged silent / missing">●</span> ` : A}
+        ${eid}
+      </span>
+    `;
+    }
     _renderSetupStep(step) {
         const tier = step.tier ?? "USELESS";
         const tierBadge = {
@@ -4818,7 +5193,10 @@ class HaInsightsCard extends i {
               </div>`
             : insight.detector === "setup_quality"
                 ? this._renderSetupGuideBody(insight)
-                : b `
+                : insight.detector === "automation_audit"
+                    && insight.payload_format !== "automation"
+                    ? this._renderAuditBody(insight)
+                    : b `
                 <div class="dialog-body">
                   ${this._renderModalError()}
                   ${this._renderTestResults()}
@@ -4827,28 +5205,28 @@ class HaInsightsCard extends i {
                     <span class="pill">${insight.detector}</span>
                     ${insight.area_id ? b `<span class="pill">${insight.area_id}</span>` : A}
                     ${insight.conflicts_with.length > 0
-                    ? b `<span class="pill" style="color: var(--warning-color)">conflicts</span>`
-                    : A}
+                        ? b `<span class="pill" style="color: var(--warning-color)">conflicts</span>`
+                        : A}
                   </div>
                   <h4>${this._payloadHeading(insight.payload_format)}</h4>
                   ${this._renderPayloadView(insight)}
                   ${insight.explanation
-                    ? b `<div class="explanation">${insight.explanation}</div>`
-                    : A}
+                        ? b `<div class="explanation">${insight.explanation}</div>`
+                        : A}
                   ${this._hypothesisById.has(insight.id)
-                    ? b `<div class="explanation hypothesis">
+                        ? b `<div class="explanation hypothesis">
                         <strong>Likely causes:</strong>
                         ${this._hypothesisById.get(insight.id)}
                       </div>`
-                    : A}
+                        : A}
                   ${this._renderPreview(insight)}
                   ${this._renderRename(insight, undefined)}
                   ${llmEnabled
-                    ? this._renderFeedbackInput(insight, "Notes for the LLM (optional, used by Refine)")
-                    : A}
+                        ? this._renderFeedbackInput(insight, "Notes for the LLM (optional, used by Refine)")
+                        : A}
                   <div class="explain-row">
                     ${llmEnabled && !insight.explanation
-                    ? b `
+                        ? b `
                           <button
                             class="action ${this._explainBusy ? "busy-pulse" : ""}"
                             ?disabled=${this._explainBusy}
@@ -4857,39 +5235,39 @@ class HaInsightsCard extends i {
                             ${this._explainBusy ? "💭 thinking…" : "Explain with LLM"}
                           </button>
                         `
-                    : A}
+                        : A}
                     ${llmEnabled && insight.payload_format === "automation"
-                    ? b `
+                        ? b `
                           <button
                             class="action ${this._refineBusy ? "busy-pulse" : ""}"
                             ?disabled=${this._refineBusy}
                             title="${this._refineConversationById.has(insight.id)
-                        ? "Continue the LLM conversation with new feedback"
-                        : "Ask the LLM to refine this automation"}"
+                            ? "Continue the LLM conversation with new feedback"
+                            : "Ask the LLM to refine this automation"}"
                             @click=${() => this._refine(insight)}
                           >
                             ${this._refineBusy
-                        ? "💭 refining…"
-                        : this._refineConversationById.has(insight.id)
-                            ? `✨ Refine again (turn ${(this._refineTurnsById.get(insight.id) ?? 0) + 1})`
-                            : "✨ Refine with LLM"}
+                            ? "💭 refining…"
+                            : this._refineConversationById.has(insight.id)
+                                ? `✨ Refine again (turn ${(this._refineTurnsById.get(insight.id) ?? 0) + 1})`
+                                : "✨ Refine with LLM"}
                           </button>
                           ${this._refineConversationById.has(insight.id)
-                        ? b `<button
+                            ? b `<button
                                 class="action"
                                 title="Forget the prior conversation and start a fresh refine thread"
                                 @click=${() => {
-                            this._resetRefineConversation(insight.id);
-                            this._toast = "Refine conversation reset";
-                        }}
+                                this._resetRefineConversation(insight.id);
+                                this._toast = "Refine conversation reset";
+                            }}
                               >
                                 🔁 Reset conversation
                               </button>`
-                        : A}
+                            : A}
                         `
-                    : A}
+                        : A}
                     ${llmEnabled
-                    ? b `
+                        ? b `
                           <button
                             class="action"
                             ?disabled=${this._previewBusy}
@@ -4897,15 +5275,15 @@ class HaInsightsCard extends i {
                             @click=${() => this._previewRedaction(insight)}
                           >
                             ${this._previewBusy
-                        ? "loading…"
-                        : this._previewById.has(insight.id)
-                            ? "🛡️ Hide preview"
-                            : "🛡️ What gets sent?"}
+                            ? "loading…"
+                            : this._previewById.has(insight.id)
+                                ? "🛡️ Hide preview"
+                                : "🛡️ What gets sent?"}
                           </button>
                         `
-                    : A}
+                        : A}
                     ${llmEnabled && insight.kind === "anomaly"
-                    ? b `
+                        ? b `
                           <button
                             class="action ${this._hypothesizeBusy ? "busy-pulse" : ""}"
                             ?disabled=${this._hypothesizeBusy}
@@ -4913,15 +5291,15 @@ class HaInsightsCard extends i {
                             @click=${() => this._hypothesize(insight)}
                           >
                             ${this._hypothesizeBusy
-                        ? "💭 thinking…"
-                        : this._hypothesisById.has(insight.id)
-                            ? "🔍 Re-hypothesize"
-                            : "🔍 Get hypothesis"}
+                            ? "💭 thinking…"
+                            : this._hypothesisById.has(insight.id)
+                                ? "🔍 Re-hypothesize"
+                                : "🔍 Get hypothesis"}
                           </button>
                         `
-                    : A}
+                        : A}
                     ${ttsConfigured && insight.explanation
-                    ? b `
+                        ? b `
                           <button
                             class="action"
                             ?disabled=${this._ttsBusy}
@@ -4931,9 +5309,9 @@ class HaInsightsCard extends i {
                             ${this._ttsBusy ? "speaking…" : "🔊 Read aloud"}
                           </button>
                         `
-                    : A}
+                        : A}
                     ${insight.payload_format === "automation"
-                    ? b `<button
+                        ? b `<button
                           class="action"
                           ?disabled=${this._testBusy}
                           title="Fire the action(s) for real"
@@ -4941,22 +5319,22 @@ class HaInsightsCard extends i {
                         >
                           ${this._testBusy ? "testing…" : "🔥 Test actions"}
                         </button>`
-                    : A}
+                        : A}
                   </div>
                   ${!llmEnabled
-                    ? b `<div class="subtitle" style="margin-top: 12px;">
+                        ? b `<div class="subtitle" style="margin-top: 12px;">
                         LLM Explain / Refine disabled — enable Local or Cloud mode in
                         Settings → Devices & Services.
                       </div>`
-                    : A}
+                        : A}
                 </div>
                 <div class="dialog-footer">
                   <button class="action" ?disabled=${busy} @click=${() => this._dismiss(insight)}>
                     Dismiss
                   </button>
                   ${insight.applied_at
-                    ? A
-                    : b `<button
+                        ? A
+                        : b `<button
                         class="action"
                         ?disabled=${busy}
                         @click=${() => this._snooze(insight)}
@@ -4964,7 +5342,7 @@ class HaInsightsCard extends i {
                         Snooze 7d
                       </button>`}
                   ${insight.applied_at
-                    ? b `<button
+                        ? b `<button
                         class="action primary"
                         ?disabled=${busy}
                         title="Remove the automation and revert this insight to active"
@@ -4972,15 +5350,15 @@ class HaInsightsCard extends i {
                       >
                         ${busy ? "undoing…" : "↶ Undo apply"}
                       </button>`
-                    : insight.payload_format === "automation"
-                        ? b `<button
+                        : insight.payload_format === "automation"
+                            ? b `<button
                           class="action primary"
                           ?disabled=${busy}
                           @click=${() => this._apply(insight)}
                         >
                           ${busy ? "applying…" : "Apply"}
                         </button>`
-                        : A}
+                            : A}
                 </div>
               `}
         </div>
