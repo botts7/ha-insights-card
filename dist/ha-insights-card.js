@@ -3917,7 +3917,11 @@ class HaInsightsCard extends i {
               @click=${(e) => e.stopPropagation()}
             >${this._renderCohortMembers(insight, members)}</div>`
             : A}
-        <div class="row-meta">
+        <div
+          class="row-meta"
+          @click=${(e) => e.stopPropagation()}
+          title="Click the title to open insight details — these badges show context only."
+        >
           <span class="pill ${confidenceClass}">confidence ${confidencePct}%</span>
           <span class="pill">${insight.detector}</span>
           ${insight.area_id

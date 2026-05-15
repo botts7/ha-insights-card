@@ -3068,7 +3068,11 @@ export class HaInsightsCard extends LitElement {
               @click=${(e: Event) => e.stopPropagation()}
             >${this._renderCohortMembers(insight, members)}</div>`
           : nothing}
-        <div class="row-meta">
+        <div
+          class="row-meta"
+          @click=${(e: Event) => e.stopPropagation()}
+          title="Click the title to open insight details — these badges show context only."
+        >
           <span class="pill ${confidenceClass}">confidence ${confidencePct}%</span>
           <span class="pill">${insight.detector}</span>
           ${insight.area_id
