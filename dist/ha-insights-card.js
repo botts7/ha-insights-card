@@ -4024,6 +4024,9 @@ class HaInsightsCard extends i {
         const t = payload._timing_assessment;
         const c = payload._cooccurrence_assessment;
         const p = payload._persistence_assessment;
+        // v1.5.40: 4th grader — transition_entropy (context diversity).
+        // Optional; present only when detector passed distinct_entity_counts.
+        const e = payload._transition_entropy_assessment;
         const timingClass = typeof t?.timing_class === "string" ? t.timing_class : "";
         const cooccClass = typeof c?.cooccurrence_class === "string"
             ? c.cooccurrence_class
@@ -4031,18 +4034,23 @@ class HaInsightsCard extends i {
         const persClass = typeof p?.persistence_class === "string"
             ? p.persistence_class
             : "";
+        const entropyClass = typeof e?.transition_entropy_class === "string"
+            ? e.transition_entropy_class
+            : "";
         const isDeviceTiming = timingClass === "device_likely";
         const isTightTiming = timingClass === "tight_pattern";
         const isIsolatedCoocc = cooccClass === "isolated";
         const isAmbiguousCoocc = cooccClass === "ambiguous";
         const isFixedPersistence = persClass === "fixed_cycle";
         const isTightPersistence = persClass === "tight_duration";
+        const isNovelEntropy = entropyClass === "novel_context";
         if (!isDeviceTiming
             && !isTightTiming
             && !isIsolatedCoocc
             && !isAmbiguousCoocc
             && !isFixedPersistence
-            && !isTightPersistence) {
+            && !isTightPersistence
+            && !isNovelEntropy) {
             return A;
         }
         // Multi-line tooltip — each signal contributes one paragraph so
@@ -4055,16 +4063,19 @@ class HaInsightsCard extends i {
             reasons.push(c.reason);
         if (p?.reason && (isFixedPersistence || isTightPersistence))
             reasons.push(p.reason);
+        if (e?.reason && isNovelEntropy)
+            reasons.push(e.reason);
         const reason = reasons.join("\n\n") || "Likelihood analysis details unavailable";
         // Severity escalation: any one strong device signal → "device-
-        // managed" (warning color). Two or more soft signals stacking
-        // also escalate. Otherwise tight-pattern (info color).
+        // managed" (warning color). Multiple soft signals stacking also
+        // escalate. Otherwise tight-pattern (info color).
         const strongSignals = (isDeviceTiming ? 1 : 0)
             + (isIsolatedCoocc ? 1 : 0)
             + (isFixedPersistence ? 1 : 0);
         const softSignals = (isTightTiming ? 1 : 0)
             + (isAmbiguousCoocc ? 1 : 0)
-            + (isTightPersistence ? 1 : 0);
+            + (isTightPersistence ? 1 : 0)
+            + (isNovelEntropy ? 1 : 0);
         const isDeviceManaged = strongSignals >= 1 || (strongSignals + softSignals) >= 3;
         if (isDeviceManaged) {
             return b `<span
