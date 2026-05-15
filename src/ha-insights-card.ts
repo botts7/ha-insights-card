@@ -3163,25 +3163,43 @@ export class HaInsightsCard extends LitElement {
     const t = payload._timing_assessment as
       | { timing_class?: string; reason?: string; stddev_seconds?: number; range_seconds?: number }
       | undefined;
-    if (!t || typeof t.timing_class !== "string") return nothing;
-    const reason = typeof t.reason === "string"
-      ? t.reason
-      : "Timing analysis details unavailable";
-    if (t.timing_class === "device_likely") {
+    // v1.2.18: also read co-occurrence to compose tooltip reason.
+    // Either signal alone produces a pill; both together combine
+    // the reasons (timing on first line, co-occurrence on second).
+    const c = payload._cooccurrence_assessment as
+      | { cooccurrence_class?: string; reason?: string }
+      | undefined;
+    const timingClass = typeof t?.timing_class === "string" ? t.timing_class : "";
+    const cooccClass = typeof c?.cooccurrence_class === "string"
+      ? c.cooccurrence_class
+      : "";
+    const isDeviceTiming = timingClass === "device_likely";
+    const isTightTiming = timingClass === "tight_pattern";
+    const isIsolatedCoocc = cooccClass === "isolated";
+    const isAmbiguousCoocc = cooccClass === "ambiguous";
+    if (!isDeviceTiming && !isTightTiming && !isIsolatedCoocc && !isAmbiguousCoocc) {
+      return nothing;
+    }
+    // Combine tooltip text from whichever signals are present.
+    const reasons: string[] = [];
+    if (t?.reason && (isDeviceTiming || isTightTiming)) reasons.push(t.reason);
+    if (c?.reason && (isIsolatedCoocc || isAmbiguousCoocc)) reasons.push(c.reason);
+    const reason = reasons.join("\n\n") || "Likelihood analysis details unavailable";
+    // Worst-case classification wins on the pill text:
+    //   any device_likely → 🤖 device-managed (warning color)
+    //   any tight_pattern OR isolated context → 🤖 tight-pattern (info)
+    if (isDeviceTiming || (isIsolatedCoocc && isTightTiming)) {
       return html`<span
         class="pill"
         style="color: var(--warning-color, #ef6c00); background: rgba(239, 108, 0, 0.08);"
         title=${reason}
       >🤖 device-managed</span>`;
     }
-    if (t.timing_class === "tight_pattern") {
-      return html`<span
-        class="pill"
-        style="color: var(--info-color, #2196f3); background: rgba(33, 150, 243, 0.08);"
-        title=${reason}
-      >🤖 tight-pattern</span>`;
-    }
-    return nothing;
+    return html`<span
+      class="pill"
+      style="color: var(--info-color, #2196f3); background: rgba(33, 150, 243, 0.08);"
+      title=${reason}
+    >🤖 tight-pattern</span>`;
   }
 
   /** Rewrite the title for already-shadowed insights so it doesn't read
