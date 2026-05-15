@@ -236,6 +236,11 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
         this._saving = false;
         this._savedCount = 0;
         this._failedRows = [];
+        // v1.2.14: structured per-row record of what got assigned so the
+        // success banner can render a "Kitchen TV → Kitchen" list instead
+        // of a bare count. Format: { label, area_name } per successfully-
+        // saved row, in the order they were saved.
+        this._savedAssignments = [];
         /** When true, includes rows that already have an area. Default off
          *  so the first-load picture is "things you haven't classified yet". */
         this._showAll = false;
@@ -259,14 +264,23 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
             void this._fetchRegistries();
         }
     }
-    async _fetchRegistries() {
+    async _fetchRegistries(opts) {
         if (!this.hass)
             return;
         this._loading = true;
         this._error = undefined;
-        this._pending = new Map();
-        this._savedCount = 0;
-        this._failedRows = [];
+        // v1.2.14: don't reset saved-state on post-save refreshes — the
+        // success banner is the user's confirmation that the save worked,
+        // and clobbering it 50ms later made the dialog look like it
+        // "popped up for a second then disappeared". On dialog OPEN we
+        // do reset (preserveSavedState left default) since the prior
+        // session's saved-state is stale by then.
+        if (!opts?.preserveSavedState) {
+            this._pending = new Map();
+            this._savedCount = 0;
+            this._failedRows = [];
+            this._savedAssignments = [];
+        }
         try {
             const [areas, devices, entities] = await Promise.all([
                 this.hass.connection.sendMessagePromise({
@@ -413,10 +427,19 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
         this._saving = true;
         this._failedRows = [];
         this._savedCount = 0;
+        this._savedAssignments = [];
         const failed = [];
-        let saved = 0;
+        const succeededKeys = [];
+        const summary = [];
         for (const [key, area_id] of this._pending.entries()) {
             const [kind, id] = key.split(":", 2);
+            // v1.2.14: capture the human-readable label + area name BEFORE
+            // the registry update succeeds, so the post-save summary can
+            // show "Kitchen TV → Kitchen" rather than just an ID.
+            const label = this._labelForKey(kind, id);
+            const areaName = area_id
+                ? this._areaNameById(area_id)
+                : "(no area)";
             try {
                 if (kind === "device") {
                     await this.hass.connection.sendMessagePromise({
@@ -432,24 +455,53 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
                         area_id: area_id || null,
                     });
                 }
-                saved += 1;
+                succeededKeys.push(key);
+                summary.push({ label, area_name: areaName });
             }
             catch (err) {
-                failed.push(`${id}: ${this._errMsg(err)}`);
+                failed.push(`${label}: ${this._errMsg(err)}`);
             }
         }
-        this._savedCount = saved;
+        // v1.2.14: drop successfully-saved rows from _pending so the
+        // "Save N changes" button reflects only the work still owed.
+        // Pre-v1.2.14 the pending map was never cleared, so the button
+        // re-armed itself forever and a second click would attempt to
+        // re-save rows the registry already accepted.
+        if (succeededKeys.length > 0) {
+            const next = new Map(this._pending);
+            for (const k of succeededKeys)
+                next.delete(k);
+            this._pending = next;
+        }
+        this._savedCount = summary.length;
+        this._savedAssignments = summary;
         this._failedRows = failed;
         this._saving = false;
         // Refresh registries so the table reflects the saved state.
-        // (Cheap; HA caches and returns the new values.)
-        await this._fetchRegistries();
+        // preserveSavedState=true keeps the success banner visible —
+        // pre-v1.2.14 we wiped _savedCount inside _fetchRegistries, which
+        // made the success banner flash and disappear immediately.
+        await this._fetchRegistries({ preserveSavedState: true });
         // Emit so the host can refresh its own list / fire a scan.
         this.dispatchEvent(new CustomEvent("assignments-saved", {
-            detail: { saved, failed: failed.length },
+            detail: { saved: summary.length, failed: failed.length },
             bubbles: true,
             composed: true,
         }));
+    }
+    /** v1.2.14: friendly label for a pending row key, used in the
+     *  post-save summary. Devices fall back to `<no name>` if HA gave
+     *  us a device with neither name nor name_by_user. */
+    _labelForKey(kind, id) {
+        if (kind === "device") {
+            const d = this._devices.find((x) => x.id === id);
+            return (d?.name_by_user || d?.name || `<device ${id.slice(0, 8)}…>`);
+        }
+        if (kind === "entity") {
+            const e = this._entities.find((x) => x.entity_id === id);
+            return e?.name || id;
+        }
+        return id;
     }
     _renderAreaPicker(key, currentAreaId) {
         const pendingValue = this._pending.get(key);
@@ -471,7 +523,7 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
         <option value="__unchanged__">
           ${currentAreaId
             ? `keep current (${this._areaNameById(currentAreaId)})`
-            : "— pick an area —"}
+            : "Pick area…"}
         </option>
         ${currentAreaId
             ? b `<option value="">— clear area —</option>`
@@ -491,6 +543,12 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
         }
         return b `
       <table>
+        <colgroup>
+          <col class="col-name" />
+          <col class="col-meta" />
+          <col class="col-current" />
+          <col class="col-new" />
+        </colgroup>
         <thead>
           <tr>
             <th>Device</th>
@@ -529,6 +587,12 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
         }
         return b `
       <table>
+        <colgroup>
+          <col class="col-name" />
+          <col class="col-meta" />
+          <col class="col-current" />
+          <col class="col-new" />
+        </colgroup>
         <thead>
           <tr>
             <th>Entity</th>
@@ -587,7 +651,18 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
             : A}
             ${this._savedCount > 0
             ? b `<div class="success">
-                  ✓ Saved ${this._savedCount} assignment${this._savedCount === 1 ? "" : "s"}.
+                  <div class="success-headline">
+                    ✓ Saved ${this._savedCount} assignment${this._savedCount === 1 ? "" : "s"}.
+                  </div>
+                  ${this._savedAssignments.length > 0
+                ? b `<ul class="success-summary">
+                        ${this._savedAssignments.map((a) => b `<li>
+                            <span class="sa-label">${a.label}</span>
+                            <span class="sa-arrow">→</span>
+                            <span class="sa-area">${a.area_name}</span>
+                          </li>`)}
+                      </ul>`
+                : A}
                 </div>`
             : A}
             ${this._failedRows.length > 0
@@ -802,6 +877,19 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
       width: 100%;
       border-collapse: collapse;
       font-size: 0.92em;
+      table-layout: fixed;
+    }
+    /* v1.2.14: explicit column widths so the "New area" picker has
+       room for "Pick area…" + the longest area name without truncating
+       to "pick an are". Manufacturer column wraps text rather than
+       eating the picker's column. */
+    .col-name { width: 26%; }
+    .col-meta { width: 30%; }
+    .col-current { width: 14%; }
+    .col-new { width: 30%; }
+    td.meta {
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     th {
       text-align: left;
@@ -868,6 +956,41 @@ let BulkAreaAssignDialog = class BulkAreaAssignDialog extends i {
       border-radius: 4px;
       color: var(--primary-text-color);
       font-size: 0.92em;
+    }
+    .success-headline {
+      font-weight: 500;
+    }
+    .success-summary {
+      margin: 8px 0 0 0;
+      padding: 0;
+      list-style: none;
+      max-height: 200px;
+      overflow-y: auto;
+      font-size: 0.88em;
+    }
+    .success-summary li {
+      display: flex;
+      gap: 8px;
+      padding: 4px 0;
+      border-top: 1px solid rgba(76, 175, 80, 0.15);
+    }
+    .success-summary li:first-child {
+      border-top: none;
+      margin-top: 4px;
+    }
+    .sa-label {
+      font-weight: 500;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sa-arrow {
+      color: var(--secondary-text-color);
+    }
+    .sa-area {
+      flex: 1;
+      color: var(--success-color, #2e7d32);
     }
     .success {
       margin-bottom: 12px;
@@ -942,6 +1065,9 @@ __decorate([
 __decorate([
     r()
 ], BulkAreaAssignDialog.prototype, "_failedRows", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_savedAssignments", void 0);
 __decorate([
     r()
 ], BulkAreaAssignDialog.prototype, "_showAll", void 0);
