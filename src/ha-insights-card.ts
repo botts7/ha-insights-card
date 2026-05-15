@@ -143,6 +143,12 @@ export class HaInsightsCard extends LitElement {
   @state() private _totalFilteredCount = 0;
 
   private _unsub?: () => void;
+  // v1.2.13: re-entry guard for `_wire()`. Both connectedCallback (the
+  // re-mount recovery added in v1.2.13) and `updated(changedProps)` can
+  // race to fire `_wire()` within the same microtask if Lit reassigns
+  // hass during element re-attachment. Without a guard we'd open two
+  // subscriptions, leak the first `_unsub`, and double-handle events.
+  private _wiring = false;
   private _toastTimer?: number;
   private _resizeObserver?: ResizeObserver;
   private _keydownHandler = (e: KeyboardEvent) => {
@@ -1150,11 +1156,29 @@ export class HaInsightsCard extends LitElement {
       }
     });
     this._resizeObserver.observe(this);
-    // v1.2.9: visibility-resume handler removed. HA's WS library
-    // auto-reconnects + auto-resubscribes on backgrounding. With the
-    // _loading flag gone (also v1.2.9), there's no stuck state for
-    // tab-return to recover from. The subscription naturally delivers
-    // any events that fired during the pause when it resumes.
+    // v1.2.13: re-wire on re-mount.
+    //
+    // Background: v1.2.9 made render `_hello`-gated and removed the
+    // `_loading` flag — "data-driven render". `disconnectedCallback`
+    // clears `_hello` so a fresh fetch fires on re-mount. The
+    // `_wire()` trigger lives in `updated()` keyed on
+    // `changedProps.has("hass")`.
+    //
+    // That works when HA's panel framework drops the element and
+    // mounts a fresh one (Lit sets `hass` from scratch → "change").
+    // BUT when the framework keeps the SAME element instance and
+    // just toggles its connected state (e.g. tab switch / "back from
+    // another app"), `hass` keeps its old reference and `updated()`
+    // doesn't see a hass-change → `_wire()` never fires → card
+    // renders the empty `!_hello` placeholder forever.
+    //
+    // The defensive recovery: if we have `hass` already AND no
+    // `_hello`, fire `_wire()` now. Idempotent — `_wire()` short-
+    // circuits if it's already running, and a successful run sets
+    // `_hello` so the next reconnect cycle skips the work.
+    if (this.hass && !this._hello) {
+      void this._wire();
+    }
   }
 
   private _scanStarted = (): void => {
@@ -1306,6 +1330,8 @@ export class HaInsightsCard extends LitElement {
 
   private async _wire(): Promise<void> {
     if (!this.hass) return;
+    if (this._wiring) return; // v1.2.13: re-entry guard
+    this._wiring = true;
     // v1.2.8: every WS call gets a timeout. If the call hangs (post-
     // tab-resume, WS-reconnect-in-flight, slow integration startup),
     // we surface a real error after 8s instead of sitting on
@@ -1315,45 +1341,54 @@ export class HaInsightsCard extends LitElement {
     // on success. The card always renders SOMETHING useful — never
     // a stuck curtain.
     try {
-      this._hello = await this._withTimeout(
-        this.hass.connection.sendMessagePromise<HelloResult>({
-          type: "home_insights/hello",
-          card_version: "0.8.2",
-        }),
-        "home_insights/hello",
-      );
-    } catch (err) {
-      this._error = `Integration not reachable: ${this._asMessage(err)}`;
-      return;
-    }
+      try {
+        this._hello = await this._withTimeout(
+          this.hass.connection.sendMessagePromise<HelloResult>({
+            type: "home_insights/hello",
+            card_version: "0.8.2",
+          }),
+          "home_insights/hello",
+        );
+      } catch (err) {
+        this._error = `Integration not reachable: ${this._asMessage(err)}`;
+        return;
+      }
 
-    try {
-      const result = await this._withTimeout(
-        this.hass.connection.sendMessagePromise<{ insights: Insight[] }>({
-          type: "home_insights/list",
-          include_applied: Boolean(this._config.include_applied),
-        }),
-        "home_insights/list",
-      );
-      this._insights = result.insights ?? [];
-      this._error = undefined; // success clears any prior error
-    } catch (err) {
-      this._error = `Could not list insights: ${this._asMessage(err)}`;
-      return;
-    }
+      try {
+        const result = await this._withTimeout(
+          this.hass.connection.sendMessagePromise<{ insights: Insight[] }>({
+            type: "home_insights/list",
+            include_applied: Boolean(this._config.include_applied),
+          }),
+          "home_insights/list",
+        );
+        this._insights = result.insights ?? [];
+        this._error = undefined; // success clears any prior error
+      } catch (err) {
+        this._error = `Could not list insights: ${this._asMessage(err)}`;
+        return;
+      }
 
-    try {
-      this._unsub = await this._withTimeout(
-        this.hass.connection.subscribeMessage<SubscribeEvent>(
-          (event) => this._handleEvent(event),
-          { type: "home_insights/subscribe" },
-        ),
-        "home_insights/subscribe",
-      );
-    } catch (err) {
-      console.warn("ha-insights-card subscribe failed", err);
-      // Subscribe is non-fatal — we have list data; the user just
-      // won't see live updates until next refresh.
+      // Drop any stale subscription from a prior wire cycle (e.g.
+      // tab-return re-mount where disconnectedCallback fired the old
+      // unsub but the new connect needs a fresh subscribe).
+      this._unsub?.();
+      this._unsub = undefined;
+      try {
+        this._unsub = await this._withTimeout(
+          this.hass.connection.subscribeMessage<SubscribeEvent>(
+            (event) => this._handleEvent(event),
+            { type: "home_insights/subscribe" },
+          ),
+          "home_insights/subscribe",
+        );
+      } catch (err) {
+        console.warn("ha-insights-card subscribe failed", err);
+        // Subscribe is non-fatal — we have list data; the user just
+        // won't see live updates until next refresh.
+      }
+    } finally {
+      this._wiring = false;
     }
   }
 
