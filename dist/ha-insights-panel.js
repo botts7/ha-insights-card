@@ -1170,6 +1170,13 @@ class HaInsightsCard extends i {
         // hass during element re-attachment. Without a guard we'd open two
         // subscriptions, leak the first `_unsub`, and double-handle events.
         this._wiring = false;
+        // v1.2.22: post-purge suppression. Set by `ha-insights-purged` window
+        // event. While Date.now() < this value, "added" subscribe events are
+        // ignored so the user sees a true empty state. The integration's
+        // periodic scan continues running in the background — when the
+        // suppression window expires, any insights detected since then will
+        // flow in normally on the next event.
+        this._suppressAddedUntil = 0;
         this._keydownHandler = (e) => {
             if (e.key === "Escape" && this._dialogId) {
                 this._closeDialog();
@@ -1177,6 +1184,20 @@ class HaInsightsCard extends i {
         };
         this._scanStarted = () => {
             this._scanInProgress = true;
+        };
+        /** v1.2.22 — hard-clear insights on panel-driven purge AND set a
+         *  short suppression window so post-purge "added" subscribe events
+         *  (from a scan that runs before the user has time to look) are
+         *  ignored. Without this, users click Purge and immediately watch
+         *  insights re-flood from the next periodic scan — looks like the
+         *  button doesn't work. */
+        this._handlePurgedEvent = (e) => {
+            const detail = e.detail;
+            const ms = typeof detail?.suppressionMs === "number" ? detail.suppressionMs : 30_000;
+            this._insights = [];
+            this._suppressAddedUntil = Date.now() + ms;
+            if (this._dialogId)
+                this._closeDialog();
         };
         this._refreshFromEvent = async () => {
             // v1.2.9: no more _loading flag to manage. Render is data-driven
@@ -2332,6 +2353,11 @@ class HaInsightsCard extends i {
         // subscribe-stream rows piling up live + getting re-deduped at the end.
         window.addEventListener("ha-insights-scan-start", this._scanStarted);
         window.addEventListener("ha-insights-refresh", this._refreshFromEvent);
+        // v1.2.22: hard-clear on purge (panel dispatches this event after
+        // calling ha_insights.purge_observations). Belt-and-braces with
+        // the subscribe-stream "purged" handling — works even if the
+        // subscribe stream is briefly desynced.
+        window.addEventListener("ha-insights-purged", this._handlePurgedEvent);
         this._resizeObserver = new ResizeObserver((entries) => {
             for (const entry of entries) {
                 this._updateAutoMaxRows(entry.contentRect.height);
@@ -2421,6 +2447,7 @@ class HaInsightsCard extends i {
         window.removeEventListener("keydown", this._keydownHandler);
         window.removeEventListener("ha-insights-scan-start", this._scanStarted);
         window.removeEventListener("ha-insights-refresh", this._refreshFromEvent);
+        window.removeEventListener("ha-insights-purged", this._handlePurgedEvent);
         // v1.2.9: resume-listener cleanup removed alongside the
         // visibility handler. Nothing to tear down besides the standard
         // subscribe handle + resize observer.
@@ -2502,6 +2529,14 @@ class HaInsightsCard extends i {
         }
         if (!event.insight)
             return;
+        // v1.2.22: drop "added" events during the post-purge suppression
+        // window. Scans keep running in the background; the user gets a
+        // brief moment of empty state before detection resumes. Other
+        // event actions (dismissed/snoozed/applied/undone) bypass —
+        // they're user-initiated and shouldn't be suppressed.
+        if (event.action === "added" && Date.now() < this._suppressAddedUntil) {
+            return;
+        }
         const next = [...this._insights];
         const idx = next.findIndex((i) => i.id === event.insight.id);
         const wantApplied = Boolean(this._config.include_applied);
@@ -6634,8 +6669,17 @@ class HaInsightsPanel extends i {
                 service: "purge_observations",
                 service_data: {},
             });
-            this._showToast("Purged all insights");
-            window.dispatchEvent(new CustomEvent("ha-insights-refresh"));
+            // v1.2.22: explicit "purged" event the card listens for. Sets
+            // a 30s suppression window during which new "added" subscribe
+            // events are ignored. Without this, the user clicks Purge and
+            // immediately sees insights repopulate from the next scan_
+            // interval-driven scan — which violates the "I wanted a clean
+            // slate" mental model even though the data IS being correctly
+            // re-detected.
+            window.dispatchEvent(new CustomEvent("ha-insights-purged", {
+                detail: { suppressionMs: 30_000 },
+            }));
+            this._showToast("Purged. New detections suppressed for 30s — click Scan now to refresh sooner.");
         }
         catch (err) {
             this._showToast(`Purge failed: ${err.message ?? String(err)}`);

@@ -1040,8 +1040,21 @@ export class HaInsightsPanel extends LitElement {
         service: "purge_observations",
         service_data: {},
       });
-      this._showToast("Purged all insights");
-      window.dispatchEvent(new CustomEvent("ha-insights-refresh"));
+      // v1.2.22: explicit "purged" event the card listens for. Sets
+      // a 30s suppression window during which new "added" subscribe
+      // events are ignored. Without this, the user clicks Purge and
+      // immediately sees insights repopulate from the next scan_
+      // interval-driven scan — which violates the "I wanted a clean
+      // slate" mental model even though the data IS being correctly
+      // re-detected.
+      window.dispatchEvent(
+        new CustomEvent("ha-insights-purged", {
+          detail: { suppressionMs: 30_000 },
+        }),
+      );
+      this._showToast(
+        "Purged. New detections suppressed for 30s — click Scan now to refresh sooner.",
+      );
     } catch (err) {
       this._showToast(
         `Purge failed: ${(err as { message?: string }).message ?? String(err)}`,

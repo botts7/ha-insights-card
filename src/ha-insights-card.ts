@@ -149,6 +149,13 @@ export class HaInsightsCard extends LitElement {
   // hass during element re-attachment. Without a guard we'd open two
   // subscriptions, leak the first `_unsub`, and double-handle events.
   private _wiring = false;
+  // v1.2.22: post-purge suppression. Set by `ha-insights-purged` window
+  // event. While Date.now() < this value, "added" subscribe events are
+  // ignored so the user sees a true empty state. The integration's
+  // periodic scan continues running in the background — when the
+  // suppression window expires, any insights detected since then will
+  // flow in normally on the next event.
+  private _suppressAddedUntil = 0;
   private _toastTimer?: number;
   private _resizeObserver?: ResizeObserver;
   private _keydownHandler = (e: KeyboardEvent) => {
@@ -1277,6 +1284,14 @@ export class HaInsightsCard extends LitElement {
       "ha-insights-refresh",
       this._refreshFromEvent as EventListener,
     );
+    // v1.2.22: hard-clear on purge (panel dispatches this event after
+    // calling ha_insights.purge_observations). Belt-and-braces with
+    // the subscribe-stream "purged" handling — works even if the
+    // subscribe stream is briefly desynced.
+    window.addEventListener(
+      "ha-insights-purged",
+      this._handlePurgedEvent as EventListener,
+    );
     this._resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         this._updateAutoMaxRows(entry.contentRect.height);
@@ -1310,6 +1325,20 @@ export class HaInsightsCard extends LitElement {
 
   private _scanStarted = (): void => {
     this._scanInProgress = true;
+  };
+
+  /** v1.2.22 — hard-clear insights on panel-driven purge AND set a
+   *  short suppression window so post-purge "added" subscribe events
+   *  (from a scan that runs before the user has time to look) are
+   *  ignored. Without this, users click Purge and immediately watch
+   *  insights re-flood from the next periodic scan — looks like the
+   *  button doesn't work. */
+  private _handlePurgedEvent = (e: Event): void => {
+    const detail = (e as CustomEvent<{ suppressionMs?: number }>).detail;
+    const ms = typeof detail?.suppressionMs === "number" ? detail.suppressionMs : 30_000;
+    this._insights = [];
+    this._suppressAddedUntil = Date.now() + ms;
+    if (this._dialogId) this._closeDialog();
   };
 
   /** v1.2.8 — timeout-wrap a WS promise so an unrecoverably-hanging
@@ -1441,6 +1470,10 @@ export class HaInsightsCard extends LitElement {
       "ha-insights-refresh",
       this._refreshFromEvent as EventListener,
     );
+    window.removeEventListener(
+      "ha-insights-purged",
+      this._handlePurgedEvent as EventListener,
+    );
     // v1.2.9: resume-listener cleanup removed alongside the
     // visibility handler. Nothing to tear down besides the standard
     // subscribe handle + resize observer.
@@ -1530,6 +1563,14 @@ export class HaInsightsCard extends LitElement {
       return;
     }
     if (!event.insight) return;
+    // v1.2.22: drop "added" events during the post-purge suppression
+    // window. Scans keep running in the background; the user gets a
+    // brief moment of empty state before detection resumes. Other
+    // event actions (dismissed/snoozed/applied/undone) bypass —
+    // they're user-initiated and shouldn't be suppressed.
+    if (event.action === "added" && Date.now() < this._suppressAddedUntil) {
+      return;
+    }
     const next = [...this._insights];
     const idx = next.findIndex((i) => i.id === event.insight!.id);
     const wantApplied = Boolean(this._config.include_applied);
