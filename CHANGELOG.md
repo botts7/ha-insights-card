@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.2.26] — 2026-05-16
+
+### Fixed
+
+- **Blank panel after navigation — TRUE root cause + permanent fix.**
+  Verified via user-supplied DevTools introspection that HA's
+  `<ha-panel-custom>` wrapper element loses its `panel.config` under
+  certain navigation cycles + browser pairings, while still being
+  rendered on the route. Without `config.component_name`, HA's
+  panel-resolver doesn't know which custom element to instantiate
+  inside the wrapper, so it stays empty. The resolver also doesn't
+  retry. Result: user sees a blank `/ha-insights` page despite our
+  panel class being correctly registered, our JS bundle being loaded,
+  and `customElements.get('ha-insights-panel')` returning `true`.
+  This is upstream HA frontend behavior, not a bug in our integration.
+
+  v1.2.24 (customElements double-register) and v1.2.25 (chrome polish)
+  were both correct fixes for OTHER classes of bug, but did not address
+  this one because the precondition checks they hardened were all green
+  in the broken state.
+
+  **Fix**: a small panel-mount-recovery sentinel installed once on
+  module load. A scoped `MutationObserver` watches for `<ha-panel-custom>`
+  elements that end up empty on the `/ha-insights*` route and force-
+  mounts `<ha-insights-panel>` inside them with `hass` / `narrow` / `panel`
+  props copied from the wrapper. Idempotent (skips already-mounted
+  wrappers), scoped to our route only, no behavior change when HA is
+  healthy. ~30 lines.
+
+  Verified with the same DevTools diagnostic that surfaced the bug:
+  `wrap.appendChild(document.createElement('ha-insights-panel'))`
+  resurrects the panel — our element renders correctly from `hass`
+  alone, doesn't depend on the missing `panel.config`.
+
 ## [1.2.25] — 2026-05-16
 
 ### Changed
