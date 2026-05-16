@@ -87,6 +87,11 @@ export class HaInsightsCard extends LitElement {
       }
     | undefined = undefined;
   @state() private _ttsBusy = false;
+  // v1.2.28: History view toggle. When true, ws_list is called with
+  // include_retired/include_dismissed/include_snoozed=true so the
+  // user can see and (un-)retire their prior lifecycle decisions.
+  // Default OFF — day-to-day view stays clean.
+  @state() private _showHistory = false;
   @state() private _refineBusy = false;
   /** v0.9 phase 6: ephemeral hypothesis text per anomaly id. Not persisted. */
   @state() private _hypothesisById = new Map<string, string>();
@@ -255,6 +260,46 @@ export class HaInsightsCard extends LitElement {
       --mdc-icon-size: 16px;
       width: 16px;
       height: 16px;
+    }
+    /* v1.2.28 — History toggle button. Same chrome as view-all so the
+       two sit together cleanly in the header. Active state uses the
+       warning color so the user sees "you're looking at history" at a
+       glance. */
+    .header .history-toggle {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.85em;
+      font-weight: 500;
+      background: transparent;
+      color: var(--primary-color);
+      padding: 6px 12px;
+      border-radius: 16px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
+      min-height: 24px;
+      cursor: pointer;
+      transition: background 120ms, border-color 120ms;
+    }
+    .header .history-toggle:hover {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+      border-color: var(--primary-color);
+    }
+    .header .history-toggle.history-toggle-on {
+      background: var(--warning-color, #f9a825);
+      color: rgba(0, 0, 0, 0.78);
+      border-color: var(--warning-color, #f9a825);
+    }
+    /* v1.2.28 — Retire action button. Same chrome as other .action
+       buttons but a muted border treatment so it reads "permanent /
+       advanced" relative to Dismiss / Snooze. Not destructive enough
+       to warrant a red color (it's reversible via the history view). */
+    button.action.retire {
+      border-style: dashed;
+    }
+    button.action.retire:hover:not(:disabled) {
+      border-style: solid;
+      border-color: var(--warning-color, #f9a825);
     }
     /* v1.2.3 — "Showing N of M — +X more →" footer for capped tiles */
     .truncation-footer {
@@ -1570,6 +1615,9 @@ export class HaInsightsCard extends LitElement {
         this.hass.connection.sendMessagePromise<{ insights: Insight[] }>({
           type: "home_insights/list",
           include_applied: Boolean(this._config.include_applied),
+          include_retired: this._showHistory,
+          include_dismissed: this._showHistory,
+          include_snoozed: this._showHistory,
         }),
         "home_insights/list",
       );
@@ -1691,6 +1739,9 @@ export class HaInsightsCard extends LitElement {
           this.hass.connection.sendMessagePromise<{ insights: Insight[] }>({
             type: "home_insights/list",
             include_applied: Boolean(this._config.include_applied),
+            include_retired: this._showHistory,
+            include_dismissed: this._showHistory,
+            include_snoozed: this._showHistory,
           }),
           "home_insights/list",
         );
@@ -1804,6 +1855,9 @@ export class HaInsightsCard extends LitElement {
         }>({
           type: "home_insights/list",
           include_applied: Boolean(this._config.include_applied),
+          include_retired: this._showHistory,
+          include_dismissed: this._showHistory,
+          include_snoozed: this._showHistory,
         });
         this._insights = result.insights ?? [];
       } catch {
@@ -2055,6 +2109,75 @@ export class HaInsightsCard extends LitElement {
       this._failModal(`Snooze failed: ${this._asMessage(err)}`);
     } finally {
       this._busyId = undefined;
+    }
+  }
+
+  /** v1.2.28: Retire an insight — the third lifecycle option alongside
+   *  Dismiss / Snooze. Different semantics: Retire means "I've decided
+   *  NOT to automate this pattern" and survives re-detections of the
+   *  same fingerprint until the user explicitly un-retires through the
+   *  history view. Stays out of the default list. */
+  private async _retire(insight: Insight): Promise<void> {
+    if (!this.hass) return;
+    this._busyId = insight.id;
+    try {
+      await this.hass.connection.sendMessagePromise({
+        type: "home_insights/retire",
+        insight_id: insight.id,
+      });
+      if (!this._showHistory) {
+        this._removeFromList(insight.id);
+      }
+      this._toast = "Retired — won't suggest again";
+    } catch (err) {
+      this._failModal(`Retire failed: ${this._asMessage(err)}`);
+    } finally {
+      this._busyId = undefined;
+    }
+  }
+
+  /** v1.2.28: Reverse a prior Retire decision. Only reachable from the
+   *  history view (where retired insights are visible). */
+  private async _unretire(insight: Insight): Promise<void> {
+    if (!this.hass) return;
+    this._busyId = insight.id;
+    try {
+      await this.hass.connection.sendMessagePromise({
+        type: "home_insights/unretire",
+        insight_id: insight.id,
+      });
+      this._toast = "Un-retired — back in the suggestion queue";
+      // Force a refresh so the row re-emerges in the default list
+      // (history toggle stays where it was).
+      window.dispatchEvent(new CustomEvent("ha-insights-refresh"));
+    } catch (err) {
+      this._failModal(`Un-retire failed: ${this._asMessage(err)}`);
+    } finally {
+      this._busyId = undefined;
+    }
+  }
+
+  /** v1.2.28: Toggle the history view. Re-fetches the list with the
+   *  retired/dismissed/snoozed surfaces opted in (or out). */
+  private async _toggleHistory(): Promise<void> {
+    this._showHistory = !this._showHistory;
+    if (!this.hass) return;
+    try {
+      const result = await this._withTimeout(
+        this.hass.connection.sendMessagePromise<{ insights: Insight[] }>({
+          type: "home_insights/list",
+          include_applied: Boolean(this._config.include_applied),
+          include_retired: this._showHistory,
+          include_dismissed: this._showHistory,
+          include_snoozed: this._showHistory,
+        }),
+        "home_insights/list (history)",
+      );
+      this._insights = result.insights ?? [];
+    } catch (err) {
+      this._failModal(
+        `Couldn't load history: ${this._asMessage(err)}`,
+      );
     }
   }
 
@@ -3372,6 +3495,16 @@ export class HaInsightsCard extends LitElement {
           </div>
           <div class="subtitle">${sub}</div>
         </div>
+        <button
+          class="history-toggle ${this._showHistory ? "history-toggle-on" : ""}"
+          title=${this._showHistory
+            ? "Hide retired / dismissed / snoozed insights"
+            : "Show retired / dismissed / snoozed insights"}
+          aria-pressed=${this._showHistory ? "true" : "false"}
+          @click=${this._toggleHistory}
+        >
+          ${this._showHistory ? "📚 Active only" : "📚 History"}
+        </button>
         <a
           class="view-all"
           href="/ha-insights"
@@ -4729,6 +4862,14 @@ export class HaInsightsCard extends LitElement {
         <button class="action" ?disabled=${busy} @click=${() => this._snooze(insight)}>
           Snooze 7d
         </button>
+        <button
+          class="action retire"
+          ?disabled=${busy}
+          title="Permanently retire this suggestion — won't appear again unless un-retired from the history view"
+          @click=${() => this._retire(insight)}
+        >
+          Retire
+        </button>
       </div>
     `;
   }
@@ -4921,6 +5062,12 @@ export class HaInsightsCard extends LitElement {
           ?disabled=${busy}
           @click=${() => this._snooze(insight)}
         >Snooze 7d</button>
+        <button
+          class="action retire"
+          ?disabled=${busy}
+          title="Permanently retire this suggestion — won't appear again unless un-retired from the history view"
+          @click=${() => this._retire(insight)}
+        >Retire</button>
       </div>
     `;
   }
@@ -5269,6 +5416,26 @@ export class HaInsightsCard extends LitElement {
                       >
                         Snooze 7d
                       </button>`}
+                  ${insight.applied_at || insight.retired_at
+                    ? nothing
+                    : html`<button
+                        class="action retire"
+                        ?disabled=${busy}
+                        title="Permanently retire this suggestion — won't appear again unless un-retired from the history view"
+                        @click=${() => this._retire(insight)}
+                      >
+                        Retire
+                      </button>`}
+                  ${insight.retired_at
+                    ? html`<button
+                        class="action"
+                        ?disabled=${busy}
+                        title="Reverse the retire decision — this insight goes back into the active queue"
+                        @click=${() => this._unretire(insight)}
+                      >
+                        ↺ Un-retire
+                      </button>`
+                    : nothing}
                   ${insight.applied_at
                     ? html`<button
                         class="action primary"
