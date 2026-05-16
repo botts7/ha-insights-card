@@ -33,7 +33,7 @@
  * already public state in HA — we're just batch-editing them.
  */
 import { LitElement, css, html, nothing, type TemplateResult } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 import type { HassLite } from "../types";
 
 interface AreaRegistryEntry {
@@ -63,7 +63,6 @@ interface EntityRegistryEntry {
   hidden_by?: string | null;
 }
 
-@customElement("bulk-area-assign-dialog")
 export class BulkAreaAssignDialog extends LitElement {
   @property({ attribute: false }) hass?: HassLite;
   @property({ type: Boolean, reflect: true }) open = false;
@@ -915,6 +914,18 @@ export class BulkAreaAssignDialog extends LitElement {
       border-color: var(--primary-color, #4c6ef5);
     }
   `;
+}
+
+// v1.2.24: switched from `@customElement` decorator to guarded
+// `customElements.define` to match the other three top-level elements
+// in this bundle. The decorator throws on re-registration via the
+// scoped-custom-element-registry polyfill, and HA re-mounts the panel
+// on tab-return — the throw at module-eval time killed all subsequent
+// code on the page, leaving the panel blank until a hard refresh.
+// Wrapping in `customElements.get(...) ?? define(...)` makes the
+// second module evaluation a no-op.
+if (!customElements.get("bulk-area-assign-dialog")) {
+  customElements.define("bulk-area-assign-dialog", BulkAreaAssignDialog);
 }
 
 declare global {

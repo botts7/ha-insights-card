@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.24] — 2026-05-16
+
+### Fixed
+
+- **Blank panel on tab-return / re-mount.** `<bulk-area-assign-dialog>`
+  used the `@customElement` decorator without a guard. When HA
+  re-mounted the panel after the tab was backgrounded, the bundle
+  module re-evaluated and the decorator called `customElements.define`
+  a second time — the scoped-custom-element-registry polyfill threw
+  `DOMException: ... has already been used with this registry`, which
+  killed every subsequent expression in the module. The panel went
+  blank until a hard refresh. Switched to the guarded `if
+  (!customElements.get(...)) customElements.define(...)` pattern that
+  the three other top-level elements (`ha-insights-card`,
+  `ha-insights-panel`, `ha-insights-card-editor`) already use. Second
+  module-eval is now a clean no-op.
+
 ## [1.2.6] — 2026-05-14
 
 ### Added
