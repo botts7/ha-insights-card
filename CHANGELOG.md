@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.2.27] — 2026-05-16
+
+### Added
+
+- **💡 Add — Suggested Additions modal.** New pill on automation-payload
+  insight rows ("💡 Add", next to the existing audit "Preview" pill) opens
+  a modal that surfaces deterministic candidate entities — coactivators,
+  device-mates, area-mates, and domain-siblings — that the user may want
+  to fold into the automation's action block.
+
+  Local-first, no LLM tokens spent. Candidates come back tier-graded
+  (HIGH / MEDIUM / LOW) with a green / amber / grey chip matching the
+  card's existing confidence-colour convention, plus a one-line reasons
+  string per row ("same area as light.kitchen · cross-domain", etc.).
+  HIGH-tier rows are pre-selected by default; user freely toggles.
+
+  Apply calls `home_insights/apply` with `additional_entity_ids: […]`.
+  The integration deterministically grafts same-domain entities into the
+  existing action's `target.entity_id` / `data.entity_id` field (any of
+  the three legacy shapes), and creates new `<domain>.turn_on` actions
+  for the 21 known turn_on/off-compatible cross-domain candidates.
+  Anything that needs a different service call (e.g. `climate.set_temperature`)
+  comes back as `unhandled_entity_ids` and the toast prompts the user
+  to open **Refine** to escalate to LLM.
+
+  Pairs with integration **v1.5.44** (which ships the
+  `home_insights/suggest_additions` WS endpoint, the candidate-builder
+  with action-target filtering, the deterministic YAML appender, and
+  the L1/L2 validation pipeline extensions).
+
 ## [1.2.26] — 2026-05-16
 
 ### Fixed
