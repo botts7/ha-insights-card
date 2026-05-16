@@ -5,3 +5,6 @@ Thumbs.db
 .idea/
 .vscode/
 .env
+
+# Local-only dev artifacts (design reviews, launch drafts)
+.dev/
