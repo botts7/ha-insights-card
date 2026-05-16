@@ -7430,6 +7430,75 @@ __decorate([
 if (!customElements.get("ha-insights-panel")) {
     customElements.define("ha-insights-panel", HaInsightsPanel);
 }
+// v1.2.26: HA panel-mount recovery sentinel.
+//
+// Root cause confirmed via user-supplied DevTools introspection: under
+// certain navigation cycles + browser/HA pairings, HA's `<ha-panel-custom>`
+// wrapper loses its `panel.config` while still being rendered. Without
+// `config.component_name`, HA's resolver doesn't know which custom
+// element to instantiate inside the wrapper, so it stays empty. The
+// resolver also doesn't retry — the user sees a blank page despite
+// `/ha-insights` being the active route.
+//
+// All preconditions for OUR side are correct (the customElements.define
+// ran; our class is registered; the JS bundle is loaded). The bug is
+// entirely in HA's panel-mount machinery losing config state.
+//
+// Workaround: a single MutationObserver watches for `<ha-panel-custom>`
+// elements that end up empty on the `/ha-insights*` route, and force-
+// mounts `<ha-insights-panel>` inside them with the hass / narrow / panel
+// props from the wrapper. Idempotent (skips already-mounted wrappers),
+// scoped to our route only, and stops being relevant the moment HA's
+// resolver works correctly. ~30 lines, no behavior change when HA is
+// healthy.
+//
+// Verified via the diagnostic that `wrap.appendChild(document
+// .createElement('ha-insights-panel'))` resurrects the panel: the class
+// instantiates correctly even when HA's `panel.config` is missing,
+// because our element reads everything it needs from `hass` (set on
+// the wrapper) and from its own internal state.
+(function installPanelMountRecovery() {
+    if (window
+        .__haInsightsPanelRecovery) {
+        return; // already installed in this page session
+    }
+    window
+        .__haInsightsPanelRecovery = true;
+    const tryRecover = () => {
+        // Cheap path-match — avoids touching wrappers for unrelated panels.
+        if (!window.location.pathname.startsWith("/ha-insights"))
+            return;
+        // ha-panel-custom is inside home-assistant-main's shadow DOM. Walk
+        // there explicitly — querySelectorAll doesn't cross shadow boundaries.
+        const ha = document.querySelector("home-assistant");
+        const main = ha?.shadowRoot?.querySelector("home-assistant-main");
+        const wrap = main?.shadowRoot?.querySelector("ha-panel-custom");
+        if (!wrap)
+            return;
+        // Already mounted? Done.
+        if (wrap.querySelector("ha-insights-panel"))
+            return;
+        // Don't fire until our class is actually registered.
+        if (!customElements.get("ha-insights-panel"))
+            return;
+        // Force-mount. Use `wrap.hass` etc. which HA does populate even when
+        // panel.config is lost (per the diagnostic). Our element renders
+        // without panel.config — it derives everything from hass.
+        const el = document.createElement("ha-insights-panel");
+        el.hass = wrap.hass;
+        el.narrow = wrap.narrow;
+        el.panel = wrap.panel;
+        wrap.appendChild(el);
+    };
+    // Initial try at module load (covers the "navigate-to-blank-panel"
+    // case where the wrapper is already empty).
+    tryRecover();
+    // Ongoing watch — fires when ha-panel-custom gets added or its children
+    // change. Scoped to body subtree, throttled implicitly by browser
+    // MutationObserver batching. Cheap.
+    const observer = new MutationObserver(() => tryRecover());
+    observer.observe(document.body, { childList: true, subtree: true });
+})();
 
 export { HaInsightsPanel };
 //# sourceMappingURL=ha-insights-panel.js.map
