@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.2.28] — 2026-05-17
+
+### Added
+
+- **Retire button** on the row dialog, alongside Dismiss and Snooze.
+  Third lifecycle option: *"I've consciously decided NOT to automate
+  this pattern, even though the detector keeps seeing it."* Survives
+  re-detections of the same fingerprint until explicitly un-retired.
+  Calls the v1.5.46 `home_insights/retire` WS endpoint. Visually
+  distinct (dashed border) so it reads as the "permanent" option
+  relative to the temporary Snooze. Confirmation copy via toast,
+  not a dialog, to keep the flow snappy.
+- **History view toggle** in the header — toggling on swaps the chip
+  to amber and re-fetches the list with `include_retired`,
+  `include_dismissed`, and `include_snoozed` all `true`. The
+  user can browse their prior lifecycle decisions, un-retire the
+  ones that should re-enter the active queue (new `↺ Un-retire`
+  button on retired rows), and toggle back to the default view
+  when done. Day-to-day list stays clean by default.
+- `Insight.retired_at` / `Insight.dismissed_at` TS types — surfaced
+  by the integration when the corresponding `include_*` flag is set
+  on the list call. Used by the row chrome to decide whether to
+  show Retire vs ↺ Un-retire.
+
+Requires integration **v1.5.46** for the new WS endpoints.
+
 ## [1.2.27] — 2026-05-16
 
 ### Added

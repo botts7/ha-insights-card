@@ -100,6 +100,15 @@ export interface Insight {
    *  for stable group_by ordering. Empty array when the entity has no
    *  labels OR the registry doesn't have the labels module. */
   labels?: string[];
+  /** v1.5.46: ISO timestamp when the user retired this insight, or
+   *  null. Retired = permanent "don't auto-suggest" decision.
+   *  Distinct from dismissed (one-off "not relevant"). Only surfaced
+   *  to the card when the list call was made with `include_retired:
+   *  true` (the history view). */
+  retired_at?: string | null;
+  /** v1.4: ISO timestamp when the user dismissed this insight, or
+   *  null. Only surfaced when list was called with `include_dismissed`. */
+  dismissed_at?: string | null;
 }
 
 export interface AutomationLink {
