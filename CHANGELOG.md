@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.2.29] — 2026-05-17
+
+### Fixed
+
+- **Release workflow can now actually update the GitHub release.**
+  `softprops/action-gh-release@v2` needs `contents: write`, but the
+  workflow didn't declare it — every tag push since v0.8 has been
+  failing with `Resource not accessible by integration`. Added the
+  `permissions` block at the workflow level.
+
+### Added
+
+- **HACS validation workflow.** `validate.yml` runs `hacs/action@main`
+  with `category: plugin` on every push and PR plus the standard
+  Monday-04:00 cron. The HACS catalog PR template requires a link
+  to a successful HACS action run; until v1.2.29 the card had no
+  such workflow.
+
+This release exists purely to unblock the HACS catalog submission
+([hacs/default](https://github.com/hacs/default) PR for botts7/ha-insights-card).
+
 ## [1.2.28] — 2026-05-17
 
 ### Added
