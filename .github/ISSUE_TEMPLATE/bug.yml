@@ -1,0 +1,81 @@
+name: 🐛 Card / panel bug
+description: Frontend bug — blank screen, broken filter, layout issue, click handler not firing.
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Most HA Insights frontend bugs are 5-line fixes once we can reproduce.
+
+        **First, hard-refresh** (Ctrl+Shift+R, or Cmd+Shift+R on macOS). If that fixes it, the cause is browser-cache and the integration's panel cache-bust missed a beat — still worth reporting so we can tighten the cache-bust.
+
+  - type: input
+    id: card-version
+    attributes:
+      label: ha-insights-card version
+      description: Check `manifest.json` at https://github.com/botts7/ha-insights-card/blob/main/manifest.json or look in HACS → Frontend → HA Insights Card.
+      placeholder: "1.2.23"
+    validations:
+      required: true
+
+  - type: input
+    id: integration-version
+    attributes:
+      label: ha-insights integration version
+      placeholder: "1.5.42"
+    validations:
+      required: true
+
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant Core version
+      placeholder: "2024.12.5"
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser + OS
+      placeholder: "Chrome 130 on Windows 11, Safari 17 on iOS 18, Firefox 130 on macOS, etc."
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      placeholder: |
+        Switched away from HA Insights panel for 5 min, came back — panel was blank. Refresh fixes it but is annoying.
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Browser console errors
+      description: DevTools → Console → look for red errors around the time of the bug.
+      render: shell
+      placeholder: |
+        ha-insights-panel.js:123 Uncaught TypeError: Cannot read property 'insights' of undefined
+    validations:
+      required: false
+
+  - type: textarea
+    id: integration-logs
+    attributes:
+      label: HA Insights integration logs
+      description: |
+        Settings → System → Logs → search "ha_insights". If empty, set DEBUG level via Developer Tools → Services → `logger.set_level`.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I have redacted any real entity_ids, area names, or personal info from logs above. Replace with `<entity_a>`, `<area_living>`.
+          required: true

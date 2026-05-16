@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Discussions
+    url: https://github.com/botts7/ha-insights/discussions
+    about: Shared discussion forum with the integration repo — open-ended ideas land there.
+  - name: 🔍 Integration backend issues
+    url: https://github.com/botts7/ha-insights/issues/new/choose
+    about: If your bug is in the detector / audit / privacy pipeline (not the card UX), report it on the integration repo.

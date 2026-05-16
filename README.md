@@ -1,5 +1,13 @@
 # HA Insights Card
 
+> ⚠️ **Early public release (v1.2.23).** Bundles the panel + Lovelace
+> card UX for the [HA Insights integration](https://github.com/botts7/ha-insights).
+> The card surface is **still hardening** — known: blank-on-tab-return
+> after backgrounding. Most bugs in the wider HA Insights project live
+> here in the frontend; please report frontend issues against this
+> repo (not the integration). PRs welcome —
+> [issue tracker](https://github.com/botts7/ha-insights-card/issues/new/choose).
+
 Lovelace card and sidebar panel for the [HA Insights](https://github.com/botts7/ha-insights) integration. Surfaces detected insights with rich actions: **Apply / Refine / Explain / Test / Snooze / Dismiss**, live-updates via the integration's WebSocket subscribe stream.
 
 ## Status
