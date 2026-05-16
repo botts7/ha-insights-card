@@ -1,5 +1,11 @@
 # HA Insights Card
 
+[![GitHub Release](https://img.shields.io/github/v/release/botts7/ha-insights-card?style=flat-square)](https://github.com/botts7/ha-insights-card/releases)
+[![License](https://img.shields.io/github/license/botts7/ha-insights-card?style=flat-square)](LICENSE)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5?style=flat-square&logo=home-assistant)](https://hacs.xyz/)
+
+![HA Insights brand icon](https://raw.githubusercontent.com/botts7/ha-insights/main/custom_components/ha_insights/brand/icon.png)
+
 > ⚠️ **Early public release (v1.2.23).** Bundles the panel + Lovelace
 > card UX for the [HA Insights integration](https://github.com/botts7/ha-insights).
 > The card surface is **still hardening** — known: blank-on-tab-return
