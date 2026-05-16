@@ -1,5 +1,51 @@
 # Changelog
 
+## [1.2.25] — 2026-05-16
+
+### Changed
+
+- **Chrome emoji icons replaced with `<ha-icon>` / MDI.** Panel action
+  strip (`Backfill`, `Run audit rollup`, `Stop rollup`, `Scan now`,
+  `Stop`, `Reload UI`, `Purge all`, `Apply all visible`) and the card
+  header's "View all" link now render via `mdi:database-refresh /
+  calendar-clock / stop / magnify-scan / refresh / delete-sweep-outline
+  / check-all / arrow-right`. Emojis in *content* (insight titles,
+  audit findings, the `🤖 device-managed` differentiator pill,
+  `🛡️ What gets sent?` privacy shield, `🔁 already automated` pill,
+  `✨ Refine` button) are preserved — those are part of the visual
+  identity. Cross-platform emoji rendering inconsistency (Windows
+  Segoe vs Apple Color Emoji vs Noto) is no longer in the chrome.
+- **Card header upgraded.** Title bumped from `1.1em / weight 500` to
+  `1.2em / weight 600`. The `vX · protocol N` subtitle is replaced by
+  a live state line — `${count} insights` when connected, `Connecting…`
+  during the handshake. The version/protocol info moves to the title's
+  `title=` tooltip so it stays discoverable for debugging. "View all"
+  is now a proper pill-style outlined button with a 24×24 minimum
+  touch target (WCAG 2.2 AA) and a `mdi:arrow-right` icon.
+- **`Scan now` promoted to primary action** in the panel header (filled
+  primary color). The other 7 buttons keep their outlined treatment
+  but no longer compete for attention.
+- **Row meta tiered into two lines.** Primary line keeps action-relevant
+  pills (`confidence`, maturity, `✓ applied`, `🔁 already automated`,
+  `🤖 in N automations`, `🤖 device-managed`, `💬 explained`, audit
+  `🤖 Suggest` and `📋 Preview` buttons). Secondary line carries
+  identity context (`detector · area · integration · age · managed by
+  vendor`) as plain `·`-separated text in a slightly smaller, dimmer
+  treatment. Drops the per-row trust pill — the card header already
+  shows the privacy mode, so the per-row repetition was redundant.
+  Result: 7-8 pills per row become 3-4, room titles read first.
+- **Row hover affordance strengthened.** Background opacity bumped from
+  3% → 5% and a 2px primary-color inset accent bar appears on the
+  left edge when hovering, matching the Brookesia row-hover language.
+
+### Notes
+
+This is the v1.2.25 "launch polish batch 1" release — surgical visual-
+consistency changes recommended in `.dev/design-review-2026-05-16.md`.
+Items deferred to v1.2.26: filter-bar chip-picker conversion, modal-kit
+consolidation, payload YAML rendering with collapse, compact-tile
+confidence histogram, empty-state sample-row preview.
+
 ## [1.2.24] — 2026-05-16
 
 ### Fixed
