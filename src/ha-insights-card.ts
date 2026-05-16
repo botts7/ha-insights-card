@@ -200,8 +200,9 @@ export class HaInsightsCard extends LitElement {
       min-width: 0;
     }
     .title {
-      font-size: 1.1em;
-      font-weight: 500;
+      font-size: 1.2em;
+      font-weight: 600;
+      letter-spacing: -0.01em;
     }
     .subtitle {
       font-size: 0.8em;
@@ -210,15 +211,27 @@ export class HaInsightsCard extends LitElement {
     }
     .header a.view-all {
       flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
       font-size: 0.85em;
+      font-weight: 500;
       color: var(--primary-color);
       text-decoration: none;
-      padding: 4px 8px;
-      border-radius: 4px;
-      transition: background 120ms;
+      padding: 6px 12px;
+      border-radius: 16px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
+      min-height: 24px;
+      transition: background 120ms, border-color 120ms;
     }
     .header a.view-all:hover {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+      border-color: var(--primary-color);
+    }
+    .header a.view-all ha-icon {
+      --mdc-icon-size: 16px;
+      width: 16px;
+      height: 16px;
     }
     /* v1.2.3 — "Showing N of M — +X more →" footer for capped tiles */
     .truncation-footer {
@@ -400,8 +413,21 @@ export class HaInsightsCard extends LitElement {
     .row:last-child {
       border-bottom: none;
     }
+    .row {
+      position: relative;
+    }
     .row:hover {
-      background: var(--secondary-background-color, rgba(0, 0, 0, 0.03));
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.05));
+    }
+    .row:hover::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 6px;
+      bottom: 6px;
+      width: 2px;
+      background: var(--primary-color);
+      border-radius: 1px;
     }
     .row-title {
       font-weight: 500;
@@ -412,6 +438,26 @@ export class HaInsightsCard extends LitElement {
       flex-wrap: wrap;
       font-size: 0.8em;
       color: var(--secondary-text-color);
+    }
+    /* v1.2.25: tiered meta — primary pills carry actionable state
+       (confidence, applied, conflict, maturity, device-managed); secondary
+       text carries identity context (detector, area, integration, age). */
+    .row-meta-primary {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-size: 0.8em;
+      color: var(--secondary-text-color);
+    }
+    .row-meta-secondary {
+      font-size: 0.78em;
+      color: var(--secondary-text-color);
+      opacity: 0.85;
+      line-height: 1.4;
+    }
+    .row-meta-secondary .sep {
+      margin: 0 6px;
+      opacity: 0.4;
     }
     .pill {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
@@ -2896,13 +2942,22 @@ export class HaInsightsCard extends LitElement {
 
   private _renderHeader(): TemplateResult {
     const title = this._config.title ?? "HA Insights";
+    // v1.2.25: subtitle now describes STATE, not the version. Use the
+    // total filtered count (already stashed by _filtered() before
+    // truncation). Falls back to "Connecting…" while the hello
+    // handshake is in flight. Protocol/version moves to the title's
+    // tooltip so it stays available for debug without burning chrome.
+    const count = this._totalFilteredCount;
     const sub = this._hello
-      ? `v${this._hello.integration_version} · protocol ${this._hello.ws_protocol_version}`
-      : "connecting…";
+      ? `${count} ${count === 1 ? "insight" : "insights"}`
+      : "Connecting…";
+    const versionTooltip = this._hello
+      ? `${title} · v${this._hello.integration_version} · WS protocol ${this._hello.ws_protocol_version}`
+      : title;
     return html`
       <div class="header">
         <div class="titles">
-          <div class="title">
+          <div class="title" title=${versionTooltip}>
             ${title} ${this._renderModeBadge(this._hello?.privacy_mode)}
           </div>
           <div class="subtitle">${sub}</div>
@@ -2911,7 +2966,9 @@ export class HaInsightsCard extends LitElement {
           class="view-all"
           href="/ha-insights"
           title="Open the full HA Insights panel"
-        >View all →</a>
+        >View all
+          <ha-icon icon="mdi:arrow-right"></ha-icon>
+        </a>
       </div>
     `;
   }
@@ -3069,27 +3126,12 @@ export class HaInsightsCard extends LitElement {
             >${this._renderCohortMembers(insight, members)}</div>`
           : nothing}
         <div
-          class="row-meta"
+          class="row-meta-primary"
           @click=${(e: Event) => e.stopPropagation()}
           title="Click the title to open insight details — these badges show context only."
         >
           <span class="pill ${confidenceClass}">confidence ${confidencePct}%</span>
-          <span class="pill">${insight.detector}</span>
-          ${insight.area_id
-            ? html`<span class="pill">${insight.area_name ?? insight.area_id}</span>`
-            : nothing}
-          ${insight.integration
-            ? html`<span
-                class="pill"
-                style="color: var(--secondary-text-color); background: rgba(76, 110, 245, 0.10);"
-                title="Source integration for this entity. Useful context when deciding whether the schedule lives in HA (here) or in the vendor app (look for 🏷️ pill)."
-              >🔌 ${insight.integration}</span>`
-            : nothing}
-          ${this._renderTrustPill()}
           ${this._renderMaturityPill(insight)}
-          ${ageLabel
-            ? html`<span class="pill" title=${insight.created_at}>${ageLabel}</span>`
-            : nothing}
           ${insight.applied_at
             ? html`<span
                 class="pill"
@@ -3114,13 +3156,6 @@ export class HaInsightsCard extends LitElement {
                 "The entities in this insight are referenced in your existing automation(s)",
                 insight.referenced_in_automations_links ?? insight.referenced_in_automations.map((a) => ({ alias: a })),
               )
-            : nothing}
-          ${insight.external_source
-            ? html`<span
-                class="pill"
-                style="color: var(--secondary-text-color); background: rgba(33, 150, 243, 0.10);"
-                title="HA noticed this pattern but the schedule is managed in the vendor app (${insight.external_source}) — not in HA. Creating a new HA automation likely won't help."
-              >🏷️ managed externally (${insight.external_source})</span>`
             : nothing}
           ${this._renderTimingPill(insight)}
           ${insight.explanation
@@ -3148,8 +3183,43 @@ export class HaInsightsCard extends LitElement {
               >📋 Preview</button>`
             : nothing}
         </div>
+        <div
+          class="row-meta-secondary"
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          ${this._renderSecondaryMeta(insight, ageLabel)}
+        </div>
       </div>
     `;
+  }
+
+  /** v1.2.25: tiered row meta — secondary line carries identity context
+   *  (detector, area, integration, age, external source) as plain text
+   *  separated by middle-dots. Trust pill dropped from rows because the
+   *  card header already shows the privacy mode; per-row trust still
+   *  surfaces in the insight modal where the header is hidden.
+   */
+  private _renderSecondaryMeta(
+    insight: Insight,
+    ageLabel: string,
+  ): TemplateResult {
+    const parts: string[] = [insight.detector];
+    if (insight.area_id) {
+      parts.push(insight.area_name ?? insight.area_id);
+    }
+    if (insight.integration) {
+      parts.push(insight.integration);
+    }
+    if (ageLabel) {
+      parts.push(ageLabel);
+    }
+    if (insight.external_source) {
+      parts.push(`managed by ${insight.external_source}`);
+    }
+    return html`${parts.map(
+      (part, i) =>
+        html`${i > 0 ? html`<span class="sep">·</span>` : nothing}${part}`,
+    )}`;
   }
 
   /** Pull the observations array off an audit insight's payload.

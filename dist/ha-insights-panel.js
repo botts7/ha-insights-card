@@ -1281,8 +1281,9 @@ class HaInsightsCard extends i {
       min-width: 0;
     }
     .title {
-      font-size: 1.1em;
-      font-weight: 500;
+      font-size: 1.2em;
+      font-weight: 600;
+      letter-spacing: -0.01em;
     }
     .subtitle {
       font-size: 0.8em;
@@ -1291,15 +1292,27 @@ class HaInsightsCard extends i {
     }
     .header a.view-all {
       flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
       font-size: 0.85em;
+      font-weight: 500;
       color: var(--primary-color);
       text-decoration: none;
-      padding: 4px 8px;
-      border-radius: 4px;
-      transition: background 120ms;
+      padding: 6px 12px;
+      border-radius: 16px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
+      min-height: 24px;
+      transition: background 120ms, border-color 120ms;
     }
     .header a.view-all:hover {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+      border-color: var(--primary-color);
+    }
+    .header a.view-all ha-icon {
+      --mdc-icon-size: 16px;
+      width: 16px;
+      height: 16px;
     }
     /* v1.2.3 — "Showing N of M — +X more →" footer for capped tiles */
     .truncation-footer {
@@ -1481,8 +1494,21 @@ class HaInsightsCard extends i {
     .row:last-child {
       border-bottom: none;
     }
+    .row {
+      position: relative;
+    }
     .row:hover {
-      background: var(--secondary-background-color, rgba(0, 0, 0, 0.03));
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.05));
+    }
+    .row:hover::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 6px;
+      bottom: 6px;
+      width: 2px;
+      background: var(--primary-color);
+      border-radius: 1px;
     }
     .row-title {
       font-weight: 500;
@@ -1493,6 +1519,26 @@ class HaInsightsCard extends i {
       flex-wrap: wrap;
       font-size: 0.8em;
       color: var(--secondary-text-color);
+    }
+    /* v1.2.25: tiered meta — primary pills carry actionable state
+       (confidence, applied, conflict, maturity, device-managed); secondary
+       text carries identity context (detector, area, integration, age). */
+    .row-meta-primary {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-size: 0.8em;
+      color: var(--secondary-text-color);
+    }
+    .row-meta-secondary {
+      font-size: 0.78em;
+      color: var(--secondary-text-color);
+      opacity: 0.85;
+      line-height: 1.4;
+    }
+    .row-meta-secondary .sep {
+      margin: 0 6px;
+      opacity: 0.4;
     }
     .pill {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
@@ -3760,13 +3806,22 @@ class HaInsightsCard extends i {
     }
     _renderHeader() {
         const title = this._config.title ?? "HA Insights";
+        // v1.2.25: subtitle now describes STATE, not the version. Use the
+        // total filtered count (already stashed by _filtered() before
+        // truncation). Falls back to "Connecting…" while the hello
+        // handshake is in flight. Protocol/version moves to the title's
+        // tooltip so it stays available for debug without burning chrome.
+        const count = this._totalFilteredCount;
         const sub = this._hello
-            ? `v${this._hello.integration_version} · protocol ${this._hello.ws_protocol_version}`
-            : "connecting…";
+            ? `${count} ${count === 1 ? "insight" : "insights"}`
+            : "Connecting…";
+        const versionTooltip = this._hello
+            ? `${title} · v${this._hello.integration_version} · WS protocol ${this._hello.ws_protocol_version}`
+            : title;
         return b `
       <div class="header">
         <div class="titles">
-          <div class="title">
+          <div class="title" title=${versionTooltip}>
             ${title} ${this._renderModeBadge(this._hello?.privacy_mode)}
           </div>
           <div class="subtitle">${sub}</div>
@@ -3775,7 +3830,9 @@ class HaInsightsCard extends i {
           class="view-all"
           href="/ha-insights"
           title="Open the full HA Insights panel"
-        >View all →</a>
+        >View all
+          <ha-icon icon="mdi:arrow-right"></ha-icon>
+        </a>
       </div>
     `;
     }
@@ -3919,27 +3976,12 @@ class HaInsightsCard extends i {
             >${this._renderCohortMembers(insight, members)}</div>`
             : A}
         <div
-          class="row-meta"
+          class="row-meta-primary"
           @click=${(e) => e.stopPropagation()}
           title="Click the title to open insight details — these badges show context only."
         >
           <span class="pill ${confidenceClass}">confidence ${confidencePct}%</span>
-          <span class="pill">${insight.detector}</span>
-          ${insight.area_id
-            ? b `<span class="pill">${insight.area_name ?? insight.area_id}</span>`
-            : A}
-          ${insight.integration
-            ? b `<span
-                class="pill"
-                style="color: var(--secondary-text-color); background: rgba(76, 110, 245, 0.10);"
-                title="Source integration for this entity. Useful context when deciding whether the schedule lives in HA (here) or in the vendor app (look for 🏷️ pill)."
-              >🔌 ${insight.integration}</span>`
-            : A}
-          ${this._renderTrustPill()}
           ${this._renderMaturityPill(insight)}
-          ${ageLabel
-            ? b `<span class="pill" title=${insight.created_at}>${ageLabel}</span>`
-            : A}
           ${insight.applied_at
             ? b `<span
                 class="pill"
@@ -3954,13 +3996,6 @@ class HaInsightsCard extends i {
             insight.referenced_in_automations.length > 0 &&
             insight.conflicts_with.length === 0
             ? this._renderAutomationPill(`🤖 in ${insight.referenced_in_automations.length} ${insight.referenced_in_automations.length === 1 ? "automation" : "automations"}`, "var(--secondary-text-color)", "The entities in this insight are referenced in your existing automation(s)", insight.referenced_in_automations_links ?? insight.referenced_in_automations.map((a) => ({ alias: a })))
-            : A}
-          ${insight.external_source
-            ? b `<span
-                class="pill"
-                style="color: var(--secondary-text-color); background: rgba(33, 150, 243, 0.10);"
-                title="HA noticed this pattern but the schedule is managed in the vendor app (${insight.external_source}) — not in HA. Creating a new HA automation likely won't help."
-              >🏷️ managed externally (${insight.external_source})</span>`
             : A}
           ${this._renderTimingPill(insight)}
           ${insight.explanation
@@ -3988,8 +4023,36 @@ class HaInsightsCard extends i {
               >📋 Preview</button>`
             : A}
         </div>
+        <div
+          class="row-meta-secondary"
+          @click=${(e) => e.stopPropagation()}
+        >
+          ${this._renderSecondaryMeta(insight, ageLabel)}
+        </div>
       </div>
     `;
+    }
+    /** v1.2.25: tiered row meta — secondary line carries identity context
+     *  (detector, area, integration, age, external source) as plain text
+     *  separated by middle-dots. Trust pill dropped from rows because the
+     *  card header already shows the privacy mode; per-row trust still
+     *  surfaces in the insight modal where the header is hidden.
+     */
+    _renderSecondaryMeta(insight, ageLabel) {
+        const parts = [insight.detector];
+        if (insight.area_id) {
+            parts.push(insight.area_name ?? insight.area_id);
+        }
+        if (insight.integration) {
+            parts.push(insight.integration);
+        }
+        if (ageLabel) {
+            parts.push(ageLabel);
+        }
+        if (insight.external_source) {
+            parts.push(`managed by ${insight.external_source}`);
+        }
+        return b `${parts.map((part, i) => b `${i > 0 ? b `<span class="sep">·</span>` : A}${part}`)}`;
     }
     /** Pull the observations array off an audit insight's payload.
      *  Returns [] for non-audit insights. Tolerates payloads where
@@ -5945,6 +6008,9 @@ class HaInsightsPanel extends i {
       flex-shrink: 0;
     }
     .header button.action {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       background: none;
       border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
       padding: 8px 14px;
@@ -5953,8 +6019,27 @@ class HaInsightsPanel extends i {
       font-size: 0.9em;
       color: var(--primary-text-color);
     }
+    .header button.action ha-icon {
+      --mdc-icon-size: 18px;
+      width: 18px;
+      height: 18px;
+      color: var(--secondary-text-color);
+    }
+    .header button.action.primary {
+      background: var(--primary-color, #4c6ef5);
+      border-color: var(--primary-color, #4c6ef5);
+      color: var(--text-primary-color, #fff);
+      font-weight: 500;
+    }
+    .header button.action.primary ha-icon {
+      color: var(--text-primary-color, #fff);
+    }
     .header button.action:hover:not(:disabled) {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+    }
+    .header button.action.primary:hover:not(:disabled) {
+      filter: brightness(1.08);
+      background: var(--primary-color, #4c6ef5);
     }
     .header button.action:disabled {
       opacity: 0.5;
@@ -6855,7 +6940,9 @@ class HaInsightsPanel extends i {
             title="Re-populate the buffer from HA's recorder"
             @click=${this._runBackfill}
           >
-            ${this._backfillBusy ? "Backfilling…" : "🔄 Backfill"}
+            ${this._backfillBusy
+            ? "Backfilling…"
+            : b `<ha-icon icon="mdi:database-refresh"></ha-icon> Backfill`}
           </button>
           <button
             class="action"
@@ -6864,7 +6951,9 @@ class HaInsightsPanel extends i {
             title="Recompute long-term audit rollups (day-of-week / month-of-year buckets) from HA's recorder. Single click chains batches until everything is caught up OR 5-minute ceiling — Stop button interrupts."
             @click=${this._runAuditRollup}
           >
-            ${this._rollupBusy ? "Rolling up…" : "📅 Run audit rollup"}
+            ${this._rollupBusy
+            ? "Rolling up…"
+            : b `<ha-icon icon="mdi:calendar-clock"></ha-icon> Run audit rollup`}
           </button>
           ${this._rollupBusy
             ? b `<button
@@ -6873,17 +6962,19 @@ class HaInsightsPanel extends i {
                 title="Stop chaining batches. The current batch finishes; no new batch is started."
                 @click=${this._stopRollupLoop}
               >
-                ⏹ Stop rollup
+                <ha-icon icon="mdi:stop"></ha-icon> Stop rollup
               </button>`
             : ""}
           <button
-            class="action"
+            class="action primary"
             ?disabled=${this._scanBusy}
             aria-label="Run all detectors now"
             title="Run all detectors against the current buffer"
             @click=${this._runScanNow}
           >
-            ${this._scanBusy ? "Scanning…" : "🔍 Scan now"}
+            ${this._scanBusy
+            ? "Scanning…"
+            : b `<ha-icon icon="mdi:magnify-scan"></ha-icon> Scan now`}
           </button>
           ${this._scanBusy
             ? b `<button
@@ -6892,7 +6983,7 @@ class HaInsightsPanel extends i {
                 title="Stop the in-flight scan after the current detector"
                 @click=${this._cancelScan}
               >
-                ⏹ Stop
+                <ha-icon icon="mdi:stop"></ha-icon> Stop
               </button>`
             : ""}
           <button
@@ -6901,7 +6992,7 @@ class HaInsightsPanel extends i {
             title="Re-register the panel with a fresh cache-bust + force browser reload — use after deploying a new ha-insights-card.js / panel.js"
             @click=${this._reloadUi}
           >
-            🔄 Reload UI
+            <ha-icon icon="mdi:refresh"></ha-icon> Reload UI
           </button>
           <button
             class="action"
@@ -6909,7 +7000,7 @@ class HaInsightsPanel extends i {
             title="Delete every stored insight (useful when a noisy scan filled the list)"
             @click=${this._purgeAllInsights}
           >
-            🗑 Purge all
+            <ha-icon icon="mdi:delete-sweep-outline"></ha-icon> Purge all
           </button>
           <button
             class="action"
@@ -6918,7 +7009,9 @@ class HaInsightsPanel extends i {
             title="Apply every visible automation insight (respects search + confidence filters)"
             @click=${this._runBulkApply}
           >
-            ${this._bulkBusy ? "Applying…" : "✓ Apply all visible"}
+            ${this._bulkBusy
+            ? "Applying…"
+            : b `<ha-icon icon="mdi:check-all"></ha-icon> Apply all visible`}
           </button>
         </div>
       </div>

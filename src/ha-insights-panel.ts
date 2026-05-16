@@ -162,6 +162,9 @@ export class HaInsightsPanel extends LitElement {
       flex-shrink: 0;
     }
     .header button.action {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       background: none;
       border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.18));
       padding: 8px 14px;
@@ -170,8 +173,27 @@ export class HaInsightsPanel extends LitElement {
       font-size: 0.9em;
       color: var(--primary-text-color);
     }
+    .header button.action ha-icon {
+      --mdc-icon-size: 18px;
+      width: 18px;
+      height: 18px;
+      color: var(--secondary-text-color);
+    }
+    .header button.action.primary {
+      background: var(--primary-color, #4c6ef5);
+      border-color: var(--primary-color, #4c6ef5);
+      color: var(--text-primary-color, #fff);
+      font-weight: 500;
+    }
+    .header button.action.primary ha-icon {
+      color: var(--text-primary-color, #fff);
+    }
     .header button.action:hover:not(:disabled) {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+    }
+    .header button.action.primary:hover:not(:disabled) {
+      filter: brightness(1.08);
+      background: var(--primary-color, #4c6ef5);
     }
     .header button.action:disabled {
       opacity: 0.5;
@@ -1247,7 +1269,9 @@ export class HaInsightsPanel extends LitElement {
             title="Re-populate the buffer from HA's recorder"
             @click=${this._runBackfill}
           >
-            ${this._backfillBusy ? "Backfilling…" : "🔄 Backfill"}
+            ${this._backfillBusy
+              ? "Backfilling…"
+              : html`<ha-icon icon="mdi:database-refresh"></ha-icon> Backfill`}
           </button>
           <button
             class="action"
@@ -1256,7 +1280,9 @@ export class HaInsightsPanel extends LitElement {
             title="Recompute long-term audit rollups (day-of-week / month-of-year buckets) from HA's recorder. Single click chains batches until everything is caught up OR 5-minute ceiling — Stop button interrupts."
             @click=${this._runAuditRollup}
           >
-            ${this._rollupBusy ? "Rolling up…" : "📅 Run audit rollup"}
+            ${this._rollupBusy
+              ? "Rolling up…"
+              : html`<ha-icon icon="mdi:calendar-clock"></ha-icon> Run audit rollup`}
           </button>
           ${this._rollupBusy
             ? html`<button
@@ -1265,17 +1291,19 @@ export class HaInsightsPanel extends LitElement {
                 title="Stop chaining batches. The current batch finishes; no new batch is started."
                 @click=${this._stopRollupLoop}
               >
-                ⏹ Stop rollup
+                <ha-icon icon="mdi:stop"></ha-icon> Stop rollup
               </button>`
             : ""}
           <button
-            class="action"
+            class="action primary"
             ?disabled=${this._scanBusy}
             aria-label="Run all detectors now"
             title="Run all detectors against the current buffer"
             @click=${this._runScanNow}
           >
-            ${this._scanBusy ? "Scanning…" : "🔍 Scan now"}
+            ${this._scanBusy
+              ? "Scanning…"
+              : html`<ha-icon icon="mdi:magnify-scan"></ha-icon> Scan now`}
           </button>
           ${this._scanBusy
             ? html`<button
@@ -1284,7 +1312,7 @@ export class HaInsightsPanel extends LitElement {
                 title="Stop the in-flight scan after the current detector"
                 @click=${this._cancelScan}
               >
-                ⏹ Stop
+                <ha-icon icon="mdi:stop"></ha-icon> Stop
               </button>`
             : ""}
           <button
@@ -1293,7 +1321,7 @@ export class HaInsightsPanel extends LitElement {
             title="Re-register the panel with a fresh cache-bust + force browser reload — use after deploying a new ha-insights-card.js / panel.js"
             @click=${this._reloadUi}
           >
-            🔄 Reload UI
+            <ha-icon icon="mdi:refresh"></ha-icon> Reload UI
           </button>
           <button
             class="action"
@@ -1301,7 +1329,7 @@ export class HaInsightsPanel extends LitElement {
             title="Delete every stored insight (useful when a noisy scan filled the list)"
             @click=${this._purgeAllInsights}
           >
-            🗑 Purge all
+            <ha-icon icon="mdi:delete-sweep-outline"></ha-icon> Purge all
           </button>
           <button
             class="action"
@@ -1310,7 +1338,9 @@ export class HaInsightsPanel extends LitElement {
             title="Apply every visible automation insight (respects search + confidence filters)"
             @click=${this._runBulkApply}
           >
-            ${this._bulkBusy ? "Applying…" : "✓ Apply all visible"}
+            ${this._bulkBusy
+              ? "Applying…"
+              : html`<ha-icon icon="mdi:check-all"></ha-icon> Apply all visible`}
           </button>
         </div>
       </div>
