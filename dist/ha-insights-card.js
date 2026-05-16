@@ -1114,6 +1114,14 @@ class HaInsightsCard extends i {
         // from Refine so an in-flight suggest on one row doesn't disable
         // refine on another.
         this._auditSuggestBusy = null;
+        // v1.2.27 Suggested-Additions state. `_suggestAddBusy` tracks the insight_id
+        // whose candidate fetch is in flight (drives the pill's loading state).
+        // `_suggestAddDialog` holds the modal's working set when open: the
+        // candidate list as returned by the backend, the user's checkbox
+        // selection, and the apply-in-flight flag. Closing the modal resets it
+        // to undefined; the next open is a fresh fetch.
+        this._suggestAddBusy = null;
+        this._suggestAddDialog = undefined;
         this._ttsBusy = false;
         this._refineBusy = false;
         /** v0.9 phase 6: ephemeral hypothesis text per anomaly id. Not persisted. */
@@ -1823,6 +1831,109 @@ class HaInsightsCard extends i {
       line-height: 1.5;
       margin: 0;
       white-space: pre;
+    }
+    /* v1.2.27 — Suggested-Additions modal */
+    .suggest-add-intro {
+      font-size: 0.92em;
+      color: var(--secondary-text-color);
+      margin-bottom: 14px;
+      line-height: 1.5;
+    }
+    .suggest-add-error {
+      background: var(--error-color, #db4437);
+      color: var(--text-primary-color, white);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.9em;
+      margin-bottom: 12px;
+    }
+    .suggest-add-empty {
+      padding: 24px 12px;
+      text-align: center;
+      color: var(--secondary-text-color);
+      font-style: italic;
+    }
+    .suggest-add-group {
+      margin-bottom: 18px;
+    }
+    .suggest-add-group-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+      flex-wrap: wrap;
+    }
+    .suggest-add-group-blurb {
+      font-size: 0.82em;
+      color: var(--secondary-text-color);
+    }
+    .suggest-add-tier-chip {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 0.74em;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: white;
+    }
+    .suggest-add-tier-high {
+      background: var(--success-color, #2e7d32);
+    }
+    .suggest-add-tier-medium {
+      background: var(--warning-color, #f9a825);
+      color: rgba(0, 0, 0, 0.78);
+    }
+    .suggest-add-tier-low {
+      background: var(--secondary-text-color, #777);
+    }
+    .suggest-add-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 120ms ease;
+    }
+    .suggest-add-row:hover {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.03));
+    }
+    .suggest-add-row input[type="checkbox"] {
+      margin-top: 3px;
+      flex-shrink: 0;
+    }
+    .suggest-add-row-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .suggest-add-eid {
+      font-family: var(--code-font-family, monospace);
+      font-size: 0.9em;
+      word-break: break-all;
+    }
+    .suggest-add-reasons {
+      font-size: 0.78em;
+      color: var(--secondary-text-color);
+      line-height: 1.4;
+    }
+    .suggest-add-footer {
+      padding: 12px 20px;
+      border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .suggest-add-count {
+      font-size: 0.88em;
+      color: var(--secondary-text-color);
+    }
+    .suggest-add-footer-actions {
+      display: flex;
+      gap: 8px;
     }
     .explanation {
       margin-top: 12px;
@@ -3009,6 +3120,249 @@ class HaInsightsCard extends i {
      *  refine-existing-automation modal to render the result. Cached
      *  on the backend by (yaml_hash + observation_kinds_hash) so a
      *  repeated click on the same row costs zero tokens. */
+    /** v1.2.27 — Suggested-Additions, deterministic surface.
+     *
+     *  Fetches candidate entities from the backend (`home_insights/
+     *  suggest_additions`) and opens the modal with HIGH/MEDIUM/LOW
+     *  tier-grouped checkboxes. HIGH candidates are pre-selected;
+     *  MEDIUM/LOW remain unchecked. User picks, clicks Apply → calls
+     *  `home_insights/apply` with `additional_entity_ids`.
+     *
+     *  Local-first feature — no LLM tokens spent regardless of card
+     *  configuration. Cross-domain candidates outside the 21 known
+     *  turn_on/off domains come back as `unhandled_entity_ids` from
+     *  the apply call; we surface a toast with an offer to escalate
+     *  to LLM Refine for the right service call.
+     */
+    async _openSuggestAddDialog(insight) {
+        if (!this.hass)
+            return;
+        this._suggestAddBusy = insight.id;
+        try {
+            const result = await this._withTimeout(this.hass.connection.sendMessagePromise({
+                type: "home_insights/suggest_additions",
+                insight_id: insight.id,
+            }), "home_insights/suggest_additions");
+            if (!result.candidates || result.candidates.length === 0) {
+                this._toast =
+                    "No candidate additions found — no nearby entities " +
+                        "match the criteria for this automation.";
+                return;
+            }
+            // Pre-select HIGH-tier candidates by default (the recommendation).
+            // MEDIUM is visible but unchecked; LOW is collapsed under "Show
+            // more" in the modal renderer. User overrides freely.
+            const preselected = new Set(result.candidates
+                .filter((c) => c.tier === "HIGH")
+                .map((c) => c.entity_id));
+            this._suggestAddDialog = {
+                insightId: insight.id,
+                insightTitle: this._displayTitle(insight),
+                candidates: result.candidates,
+                requiredEids: result.required_entity_ids ?? [],
+                selected: preselected,
+                applying: false,
+            };
+        }
+        catch (err) {
+            this._toast = `Couldn't load candidates: ${this._asMessage(err)}`;
+        }
+        finally {
+            this._suggestAddBusy = null;
+        }
+    }
+    _toggleSuggestAddSelection(eid) {
+        if (!this._suggestAddDialog)
+            return;
+        const next = new Set(this._suggestAddDialog.selected);
+        if (next.has(eid)) {
+            next.delete(eid);
+        }
+        else {
+            next.add(eid);
+        }
+        this._suggestAddDialog = {
+            ...this._suggestAddDialog,
+            selected: next,
+        };
+    }
+    _closeSuggestAddDialog() {
+        this._suggestAddDialog = undefined;
+    }
+    async _applySuggestedAdditions() {
+        if (!this.hass || !this._suggestAddDialog)
+            return;
+        const dialog = this._suggestAddDialog;
+        const chosen = Array.from(dialog.selected);
+        if (chosen.length === 0) {
+            this._suggestAddDialog = {
+                ...dialog,
+                error: "Select at least one candidate to apply.",
+            };
+            return;
+        }
+        this._suggestAddDialog = { ...dialog, applying: true, error: undefined };
+        try {
+            const result = await this._withTimeout(this.hass.connection.sendMessagePromise({
+                type: "home_insights/apply",
+                insight_id: dialog.insightId,
+                additional_entity_ids: chosen,
+            }), "home_insights/apply (additions)");
+            const applied = chosen.length - (result.unhandled_entity_ids?.length ?? 0);
+            const unhandled = result.unhandled_entity_ids ?? [];
+            this._closeSuggestAddDialog();
+            if (unhandled.length > 0) {
+                this._toast =
+                    `Added ${applied} ${applied === 1 ? "entity" : "entities"}. ` +
+                        `${unhandled.length} cross-domain ${unhandled.length === 1 ? "candidate" : "candidates"} ` +
+                        "need LLM Refine to add (different service call). " +
+                        "Open Refine on the insight to handle them.";
+            }
+            else {
+                this._toast = `Added ${applied} ${applied === 1 ? "entity" : "entities"} to the automation.`;
+            }
+            // Force a refresh so the row reflects the applied state.
+            window.dispatchEvent(new CustomEvent("ha-insights-refresh"));
+        }
+        catch (err) {
+            this._suggestAddDialog = {
+                ...dialog,
+                applying: false,
+                error: this._asMessage(err),
+            };
+        }
+    }
+    /** v1.2.27 — Render the Suggested-Additions modal. Groups candidates by
+     *  tier (HIGH/MEDIUM/LOW) with green/amber/grey chips matching the
+     *  confidence-colour convention used elsewhere in the card. Checkboxes
+     *  are pre-selected for HIGH-tier rows by `_openSuggestAddDialog`; the
+     *  user toggles freely. Apply calls `home_insights/apply` with the
+     *  chosen entity_ids tacked onto the existing automation. */
+    _renderSuggestAddDialog() {
+        const dialog = this._suggestAddDialog;
+        if (!dialog)
+            return A;
+        const grouped = {
+            HIGH: [],
+            MEDIUM: [],
+            LOW: [],
+        };
+        for (const c of dialog.candidates) {
+            const tier = c.tier in grouped
+                ? c.tier
+                : "LOW";
+            grouped[tier].push(c);
+        }
+        const renderTierGroup = (tier, label, blurb) => {
+            const items = grouped[tier];
+            if (items.length === 0)
+                return A;
+            return b `
+        <div class="suggest-add-group">
+          <div class="suggest-add-group-header">
+            <span class="suggest-add-tier-chip suggest-add-tier-${tier.toLowerCase()}">
+              ${label}
+            </span>
+            <span class="suggest-add-group-blurb">${blurb}</span>
+          </div>
+          ${items.map((c) => {
+                const checked = dialog.selected.has(c.entity_id);
+                return b `
+              <label class="suggest-add-row">
+                <input
+                  type="checkbox"
+                  ?checked=${checked}
+                  ?disabled=${dialog.applying}
+                  @change=${() => this._toggleSuggestAddSelection(c.entity_id)}
+                />
+                <div class="suggest-add-row-text">
+                  <code class="suggest-add-eid">${c.entity_id}</code>
+                  ${c.reasons.length > 0
+                    ? b `<div class="suggest-add-reasons">
+                        ${c.reasons.join(" · ")}
+                      </div>`
+                    : A}
+                </div>
+              </label>
+            `;
+            })}
+        </div>
+      `;
+        };
+        const selectedCount = dialog.selected.size;
+        const totalCount = dialog.candidates.length;
+        return b `
+      <div class="dialog-backdrop" @click=${this._closeSuggestAddDialog}>
+        <div
+          class="dialog"
+          @click=${(e) => e.stopPropagation()}
+        >
+          <div class="dialog-header">
+            <div class="dialog-title">
+              💡 Suggest additions — ${dialog.insightTitle}
+            </div>
+            <button
+              class="dialog-close"
+              aria-label="Close"
+              ?disabled=${dialog.applying}
+              @click=${this._closeSuggestAddDialog}
+            >
+              ×
+            </button>
+          </div>
+          <div class="dialog-body">
+            <div class="suggest-add-intro">
+              Pick entities to add to this automation's action block.
+              ${dialog.requiredEids.length > 0
+            ? b `The existing
+                    <strong>${dialog.requiredEids.length}</strong>
+                    ${dialog.requiredEids.length === 1
+                ? "entity"
+                : "entities"}
+                    in the automation
+                    ${dialog.requiredEids.length === 1 ? "is" : "are"}
+                    preserved.`
+            : A}
+            </div>
+            ${dialog.error
+            ? b `<div class="suggest-add-error">${dialog.error}</div>`
+            : A}
+            ${renderTierGroup("HIGH", "HIGH", "Strong match — pre-selected. Coactivators or same-domain device-mates.")}
+            ${renderTierGroup("MEDIUM", "MEDIUM", "Worth considering — area-mates or cross-domain device-mates.")}
+            ${renderTierGroup("LOW", "LOW", "Weak match — domain-siblings or cross-domain area-mates.")}
+            ${totalCount === 0
+            ? b `<div class="suggest-add-empty">
+                  No candidate additions found.
+                </div>`
+            : A}
+          </div>
+          <div class="suggest-add-footer">
+            <div class="suggest-add-count">
+              ${selectedCount} of ${totalCount} selected
+            </div>
+            <div class="suggest-add-footer-actions">
+              <button
+                class="action"
+                ?disabled=${dialog.applying}
+                @click=${this._closeSuggestAddDialog}
+              >
+                Cancel
+              </button>
+              <button
+                class="action primary ${dialog.applying ? "busy-pulse" : ""}"
+                ?disabled=${dialog.applying || selectedCount === 0}
+                @click=${this._applySuggestedAdditions}
+              >
+                ${dialog.applying
+            ? "Applying…"
+            : `Apply ${selectedCount} to automation`}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    }
     async _runAuditSuggest(insight) {
         if (!this.hass)
             return;
@@ -4021,6 +4375,17 @@ class HaInsightsCard extends i {
                 void this._previewDeterministicAudit(insight);
             }}
               >📋 Preview</button>`
+            : A}
+          ${insight.payload_format === "automation" && !insight.applied_at
+            ? b `<button
+                class="pill-action"
+                ?disabled=${this._suggestAddBusy === insight.id}
+                title="Find candidate entities to add to this automation's action block. Deterministic, no LLM tokens."
+                @click=${(e) => {
+                e.stopPropagation();
+                void this._openSuggestAddDialog(insight);
+            }}
+              >${this._suggestAddBusy === insight.id ? "Loading…" : "💡 Add"}</button>`
             : A}
         </div>
         <div
@@ -5655,6 +6020,7 @@ class HaInsightsCard extends i {
       </ha-card>
       ${this._renderDialog()}
       ${this._renderRefineAutomationModal()}
+      ${this._renderSuggestAddDialog()}
       <bulk-area-assign-dialog
         .hass=${this.hass}
         ?open=${this._bulkAreaAssignOpen}
@@ -5721,6 +6087,12 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_auditSuggestBusy", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_suggestAddBusy", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_suggestAddDialog", void 0);
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_ttsBusy", void 0);
