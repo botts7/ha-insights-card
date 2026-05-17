@@ -3990,6 +3990,104 @@ export class HaInsightsCard extends LitElement {
     >🔗 coupled</span>`;
   }
 
+  /** v1.7.7: render the "Managed devices" section in the detail dialog.
+   *
+   *  Lists every device this insight references with a toggle to mark
+   *  it "managed externally" — a user assertion that the device handles
+   *  its own logic and HA Insights should stop surfacing patterns from
+   *  it. Companion to the 🔗 coupling badge: that one INFERS coupling
+   *  from timing; this one is the explicit user override.
+   *
+   *  Shown only when the insight carries `referenced_devices` (server
+   *  v1.7.7+) AND at least one device is present. Cohort insights with
+   *  many member devices show all of them.
+   *
+   *  Toggling fires `home_insights/set_device_managed`. After the
+   *  toggle, currently-emitted insights from the device stay in the
+   *  store (they'll be cleaned up by the next scan's stale-sweep) but
+   *  any future scan won't surface new patterns. We optimistically
+   *  update the local insight's device.managed flag so the toggle
+   *  reflects immediately.
+   */
+  private _renderManagedDevicesSection(insight: Insight): TemplateResult | typeof nothing {
+    const devices = insight.referenced_devices;
+    if (!devices || devices.length === 0) return nothing;
+    return html`
+      <h4>Devices</h4>
+      <div class="managed-devices">
+        <p style="margin-top:0; color: var(--secondary-text-color); font-size: 0.92em;">
+          Mark a device "managed externally" to stop surfacing patterns
+          from it. Different from automatic device-managed detection
+          — this is your explicit assertion.
+        </p>
+        <ul style="list-style: none; padding: 0; margin: 0;">
+          ${devices.map((d) => html`
+            <li style="display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--divider-color);">
+              <span style="flex: 1;">
+                <strong>${d.name}</strong>
+                <span style="color: var(--secondary-text-color); font-size: 0.85em; margin-left: 6px;">${d.device_id.slice(0, 8)}…</span>
+              </span>
+              ${d.managed
+                ? html`<button
+                    class="pill-action"
+                    style="background: var(--warning-color, #ef6c00); color: white; border-color: var(--warning-color, #ef6c00);"
+                    title="Currently suppressed. Click to restore — future patterns from this device will surface again."
+                    @click=${() => this._setDeviceManaged(d.device_id, false)}
+                  >✓ Suppressed — restore</button>`
+                : html`<button
+                    class="pill-action"
+                    title="Stop surfacing future insights from this device. Existing insights stay until next scan."
+                    @click=${() => this._setDeviceManaged(d.device_id, true)}
+                  >🔇 Suppress device</button>`
+              }
+            </li>
+          `)}
+        </ul>
+      </div>
+    `;
+  }
+
+  /** Toggle a device's managed-externally flag. Optimistic UI: flip
+   *  the local insight's `referenced_devices[].managed` immediately,
+   *  then call the server. On failure, log + leave the optimistic
+   *  state (user can retry; next scan will re-sync). */
+  private async _setDeviceManaged(deviceId: string, managed: boolean): Promise<void> {
+    // Optimistic local update
+    this._insights = this._insights.map((i) => {
+      if (!i.referenced_devices) return i;
+      if (!i.referenced_devices.some((d) => d.device_id === deviceId)) return i;
+      return {
+        ...i,
+        referenced_devices: i.referenced_devices.map((d) =>
+          d.device_id === deviceId ? { ...d, managed } : d
+        ),
+      };
+    });
+    try {
+      await this.hass!.callWS({
+        type: "home_insights/set_device_managed",
+        device_id: deviceId,
+        managed,
+      });
+      this._toast = managed
+        ? "Device suppressed. New patterns from it won't appear."
+        : "Device restored. Future patterns from it will appear again.";
+    } catch (err) {
+      // Revert optimistic update
+      this._insights = this._insights.map((i) => {
+        if (!i.referenced_devices) return i;
+        if (!i.referenced_devices.some((d) => d.device_id === deviceId)) return i;
+        return {
+          ...i,
+          referenced_devices: i.referenced_devices.map((d) =>
+            d.device_id === deviceId ? { ...d, managed: !managed } : d
+          ),
+        };
+      });
+      this._toast = `Failed: ${this._asMessage(err)}`;
+    }
+  }
+
   /** Render an "🔁 already automated" or "🤖 in N automations" pill.
    *
    *  Single match (N=1): plain anchor + inline ✏️. Click = open the
@@ -5344,6 +5442,7 @@ export class HaInsightsCard extends LitElement {
                         ${this._hypothesisById.get(insight.id)}
                       </div>`
                     : nothing}
+                  ${this._renderManagedDevicesSection(insight)}
                   ${this._renderPreview(insight)}
                   ${this._renderRename(insight, undefined)}
                   ${llmEnabled
