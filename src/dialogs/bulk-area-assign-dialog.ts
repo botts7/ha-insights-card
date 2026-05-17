@@ -113,7 +113,17 @@ export class BulkAreaAssignDialog extends LitElement {
    *  the user can click to fire `home_insights/identify_entity`. */
   @state() private _identifyCaps = new Map<
     string,
-    { method: string; description: string; supported: boolean }
+    {
+      method: string;
+      description: string;
+      supported: boolean;
+      // v1.9.0 — added when paired with integration v1.10.7+.
+      // Card uses these as the authoritative perturbable-check;
+      // falls back to the hardcoded set when integration is older.
+      device_class?: string | null;
+      perturbable?: boolean;
+      perturbation_state?: "supported" | "explicitly_unsupported" | "unknown";
+    }
   >();
   /** v1.6.0 — Per-entity identify-request lifecycle state.
    *
@@ -191,11 +201,13 @@ export class BulkAreaAssignDialog extends LitElement {
   /** Browser-side countdown timer ID, so we can cancel on close. */
   private _touchTestTimer: ReturnType<typeof setInterval> | null = null;
 
-  /** Hardcoded mirror of lib/perturbation_capability.py's _GUIDES keys.
-   *  Card needs to know which entities should show the 👆 button
-   *  WITHOUT round-tripping to the server for every row. Keep in
-   *  sync with the lib — see `supported_device_classes()` there. */
-  private static readonly _PERTURBABLE_DEVICE_CLASSES: ReadonlySet<string> =
+  /** Fallback set used when the integration is older than v1.10.7
+   *  and doesn't include `perturbable` in the identify_capability
+   *  response. Keep loosely in sync with
+   *  lib/perturbation_capability.py — drift here only affects
+   *  pre-v1.10.7 integrations, which won't get new device_classes
+   *  added to the list anyway. */
+  private static readonly _PERTURBABLE_FALLBACK: ReadonlySet<string> =
     new Set([
       "temperature",
       "humidity",
@@ -286,6 +298,13 @@ export class BulkAreaAssignDialog extends LitElement {
             method?: string;
             description?: string;
             supported?: boolean;
+            // v1.10.7+
+            device_class?: string | null;
+            perturbable?: boolean;
+            perturbation_state?:
+              | "supported"
+              | "explicitly_unsupported"
+              | "unknown";
             name_quality?: {
               score: number;
               tier: string;
@@ -327,6 +346,9 @@ export class BulkAreaAssignDialog extends LitElement {
             method: cap.method,
             description: cap.description,
             supported: !!cap.supported,
+            device_class: cap.device_class ?? null,
+            perturbable: cap.perturbable,
+            perturbation_state: cap.perturbation_state,
           });
         }
         if (Array.isArray(cap.same_as) && cap.same_as.length > 0) {
@@ -626,15 +648,25 @@ export class BulkAreaAssignDialog extends LitElement {
    *  instead, with the killer elimination outcome.
    */
   private _renderTouchTestButton(entity_id: string): unknown {
-    const dc = this._deviceClassOf(entity_id);
-    if (!BulkAreaAssignDialog._PERTURBABLE_DEVICE_CLASSES.has(dc)) {
-      return nothing;
-    }
     const cap = this._identifyCaps.get(entity_id);
     if (cap?.supported) {
       // Identify is a stronger signal — skip the touch-test button.
       return nothing;
     }
+    // v1.9.0 — prefer the server's authoritative `perturbable` field
+    // (integration v1.10.7+). Fallback to the local hardcoded set
+    // when paired with an older integration. Final fallback to "no
+    // button" if neither the server nor a local check resolves.
+    const dc = cap?.device_class ?? this._deviceClassOf(entity_id);
+    const isPerturbable =
+      cap?.perturbable !== undefined
+        ? cap.perturbable
+        : BulkAreaAssignDialog._PERTURBABLE_FALLBACK.has(dc);
+    if (!isPerturbable) return nothing;
+    // Keep the dc fallback for openTouchTest below — server didn't
+    // tell us, but the local set says yes, so we have *some* class
+    // to work with.
+    if (!dc) return nothing;
     return html`<button
       class="touch-test-btn"
       aria-label="Touch test: physically perturb the sensor and see which entity spikes"
@@ -965,13 +997,13 @@ export class BulkAreaAssignDialog extends LitElement {
     }
 
     // Clear match AND the user clicked the right entity.
+    const unit = this._unitFor(result.top_match!);
     return html`
       <p class="touch-test-success">
         ✓ Clear match: <b>${result.top_match}</b>
       </p>
       <p class="touch-test-meta">
-        Spiked Δ=${top.peak_delta.toFixed(2)}
-        ${this._touchTestDeviceClass === "temperature" ? "°C" : ""}
+        Spiked Δ=${top.peak_delta.toFixed(2)}${unit ? " " + unit : ""}
         (z=${top.z_score.toFixed(1)}). ${result.reason}
       </p>
       <div class="touch-test-actions">
@@ -981,6 +1013,17 @@ export class BulkAreaAssignDialog extends LitElement {
         <button @click=${this._closeTouchTest}>Close</button>
       </div>
     `;
+  }
+
+  /** v1.9.0 — pull unit_of_measurement off the entity's live state.
+   *  Returns "" when the entity has no state or no unit attribute.
+   *  Reactive: if the user reconfigures the unit, the next render
+   *  picks it up. */
+  private _unitFor(entity_id: string): string {
+    const state = this.hass?.states?.[entity_id];
+    if (!state) return "";
+    const u = state.attributes?.unit_of_measurement;
+    return typeof u === "string" ? u : "";
   }
   private _areaNameById(area_id: string | null | undefined): string {
     if (!area_id) return "";
@@ -1738,7 +1781,9 @@ export class BulkAreaAssignDialog extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      z-index: 1000;
+      /* v1.9.0 — parent .backdrop is z-index 9999; touch-test modal
+       * must stack above it or it renders BEHIND and is unclickable. */
+      z-index: 10000;
     }
     .touch-test-modal {
       background: var(--card-background-color, white);
