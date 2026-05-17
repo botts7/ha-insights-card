@@ -20,4 +20,13 @@ jobs:
       - run: npm run build
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/ha-insights-card.js
+          # v1.3.2: ship panel.js too. Pre-v1.3.2 only ha-insights-card.js
+          # was attached, so the integration couldn't pull a fresh
+          # panel.js on release — users were stuck with whatever was
+          # last manually committed (often dramatically out of date).
+          # The integration repo bundles panel.js as a static asset from
+          # v1.7.3 onward; this attachment lets that bundling step pull
+          # a freshly-built artifact per release.
+          files: |
+            dist/ha-insights-card.js
+            dist/ha-insights-panel.js

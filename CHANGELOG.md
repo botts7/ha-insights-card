@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.3.2] — 2026-05-17
+
+### Fixed
+
+- **Release workflow now attaches `ha-insights-panel.js` to GitHub
+  releases.** Pre-v1.3.2 only `ha-insights-card.js` was uploaded,
+  which meant `src/ha-insights-panel.ts` changes never reached
+  users via HACS — HACS only pulls the file in `hacs.json:filename`,
+  and the integration's expected `/local/community/ha-insights-card/
+  ha-insights-panel.js` path was filled by whatever was last
+  manually committed to `dist/`. The v1.2.26 blank-panel recovery
+  fix and the v1.3.1 shadow-DOM observer fix BOTH reached users only
+  via that fragile path.
+
+  Going forward: the integration repo bundles `panel.js` as a static
+  asset (v1.7.3+) and serves it from its own URL. This release
+  attachment lets that bundling step pull a fresh per-release build.
+
 ## [1.3.1] — 2026-05-17
 
 ### Fixed
