@@ -1,5 +1,57 @@
 # Changelog
 
+## [1.5.0] — 2026-05-17
+
+### Added
+
+- **Smart sorting + tier badges in bulk-area-assign dialog.** When
+  HA Insights v1.10.0+ is installed, the entity tab now sorts
+  worst-named entities to the top so the user attacks the
+  genuinely-confusing ones (BLE MACs, hex blobs) first instead
+  of staring at a flat alphabetical list.
+
+  Each row carries a small inline icon when name_quality scoring
+  ran:
+
+  - 🆔 MAC-pattern (`ATC_a4c138`) — strongest signal that this
+    entity needs identification; the name carries zero locational
+    information
+  - ❓ generic_domain (`light.lamp1`) — fallback object_id
+    rendering; investigate
+  - 🏷️ mfr_model (`Aqara WSDCGQ11LM`) — has manufacturer + model
+    but doesn't tell you which physical device it is
+  - ✏️ user_override — you named this one yourself; no action
+    needed
+  - ☁️ cloud — name imported from the integration's app (Tuya,
+    Hue, HomeKit, ~25 supported); should match what you named
+    it there
+
+  Tooltip on each badge carries the actual score (0–100%) and
+  the lib's reasoning so power users can verify the call.
+
+### Graceful fallback
+
+The dialog is designed to be portable to HA core, so the call
+to `home_insights/identify_capability` is opportunistic: if the
+endpoint isn't present (vanilla HA install or older HA
+Insights), the catch silently drops the enrichment and the
+dialog falls back to alphabetical sort with no badges. No
+error toast, no broken state — the integration is enrichment,
+not a hard dependency.
+
+### Performance
+
+Scores fetched once per dialog open for up to the first 500
+unassigned entities. Capped to keep the WS round-trip snappy
+on huge installs. Render re-sorts in place when the response
+arrives; the user sees alphabetical for ~100ms then the
+smart order.
+
+### Requires
+
+HA Insights integration v1.10.0+ for the smart sort to
+activate.
+
 ## [1.4.0] — 2026-05-17
 
 ### Added
