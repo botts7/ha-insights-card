@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.3.0] — 2026-05-17
+
+### Added
+
+- **🔗 Coupling-strength badge.** When a cooccurrence / lagged /
+  button-press insight comes from a tightly-coupled pair (sub-500ms
+  median lag with ≥90% consistency), the card now renders an inline
+  🔗 badge next to the title. Hover for "These entities change
+  together within ~Nms (X% consistency) — looks like a device
+  binding or a pre-existing automation, not a new pattern to
+  automate."
+- The integration also demotes such insights' confidence (×0.85) so
+  they rank below uncoupled suggestions, but they still emit — the
+  user gets to judge whether the coupling is "device-internal,
+  ignore" or "I forgot I built that automation, dismiss it."
+
+  Pairs with this signature are almost always one of:
+  - ESPHome `on_press` / Z-Wave central scene / Zigbee binding —
+    device handles the action locally, HA observes both state
+    changes microseconds apart.
+  - An existing HA automation already firing on the same trigger.
+
+  Either way, surfacing them as fresh automation suggestions is
+  noise. Now the badge tells the user why we're showing it muted
+  rather than hiding it.
+
+Requires integration v1.7.0+. Older integration versions don't stamp
+`_coupling`; the card gracefully renders nothing (back-compat).
+
 ## [1.2.29] — 2026-05-17
 
 ### Fixed
