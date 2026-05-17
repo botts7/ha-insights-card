@@ -1,5 +1,61 @@
 # Changelog
 
+## [1.10.2] — 2026-05-17
+
+### Added — specialized card-body renderers for v1.7+ insights
+
+Per agent review (Track C, modal audit): four v1.7+ detectors used
+`payload_format="card"` but the card had no specialized renderer
+for them. Their insights fell through to the generic
+`_renderPayloadView` which dumps the payload as raw JSON in the
+modal — exactly the "YAML modal where it shouldn't be" concern
+flagged during review.
+
+#### `_renderCardBody()` dispatcher
+
+Inspects `payload._<key>` blocks and routes to a per-type formatted
+body. Falls back to the generic renderer when no match.
+
+#### Three new bodies
+
+- **`_renderStateShiftBody`** (v1.8.2 `_state_shift`): "Routine
+  shift detected" — date, before/after means per day, magnitude,
+  optional explanation.
+- **`_renderPhysicalDeviceLinkBody`** (v1.11.0 `_physical_device_link`):
+  "These look like the same physical device" — entity pair, Pearson
+  r, aligned-sample count, device class, lag (with explanation when
+  non-zero). Reads BOTH new key names (`entity_id`/`peer_entity_id`
+  from v1.12.7) AND legacy (`entity_a`/`entity_b`) so cached
+  insights from older servers still render correctly.
+- **`_renderLocationProposalBody`** (v1.11.5 `_location_proposal`):
+  "Probably/Almost certainly in <area>" — match strength, top-3
+  alternative areas, advisory-only callout.
+
+#### Dispatch via `_hasSpecializedCardRenderer`
+
+Inserted into the modal-body chain (line 5516-5520 in card.ts):
+
+```
+detector === setup_quality      → _renderSetupGuideBody
+else detector === automation_audit && format !== automation
+                                → _renderAuditBody
+else _hasSpecializedCardRenderer(insight)  ← new
+                                → _renderCardBody
+else                             → generic _renderPayloadView
+```
+
+Key insight (from review): dispatch on payload-key, NOT detector
+name. Detectors get renamed; the v1.7+ payload-key contract is
+the public surface and gets advertised per CHANGELOG.
+
+### CSS additions
+
+`.state-shift-summary`, `.state-shift-line`, `.state-shift-label`,
+`.state-shift-value`, `.device-link-pair`, `.device-link-eid`,
+`.device-link-arrow`, `.location-proposal-summary`,
+`.location-alt-list`, `.location-proposal-note`. All use existing
+theme variables so users' theme overrides apply.
+
 ## [1.10.1] — 2026-05-17
 
 ### Changed

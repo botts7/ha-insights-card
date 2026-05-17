@@ -932,6 +932,71 @@ export class HaInsightsCard extends LitElement {
       font-style: italic;
       line-height: 1.5;
     }
+    /* v1.12.8 — Specialized card-body renderers (state_shift,
+     * physical_device_link, location_proposal). Replaces the
+     * generic JSON dump for these v1.7+ insight payloads. */
+    .state-shift-summary {
+      margin: 12px 0;
+      padding: 12px;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-radius: 4px;
+    }
+    .state-shift-line {
+      display: flex;
+      gap: 12px;
+      padding: 4px 0;
+    }
+    .state-shift-label {
+      min-width: 140px;
+      color: var(--secondary-text-color);
+      font-weight: 600;
+    }
+    .state-shift-value {
+      font-family: monospace;
+    }
+    .device-link-pair {
+      margin: 12px 0;
+      padding: 16px;
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.02));
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+    .device-link-eid {
+      font-family: monospace;
+      padding: 4px 8px;
+      background: var(--card-background-color, white);
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-radius: 3px;
+    }
+    .device-link-arrow {
+      font-size: 1.4em;
+      color: var(--primary-color);
+    }
+    .location-proposal-summary {
+      margin: 12px 0;
+      padding: 12px;
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.02));
+      border-radius: 4px;
+      line-height: 1.5;
+    }
+    .location-alt-list {
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }
+    .location-alt-list li {
+      padding: 2px 0;
+    }
+    .location-proposal-note {
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: rgba(33, 150, 243, 0.1);
+      border-left: 3px solid var(--info-color, #2196f3);
+      border-radius: 3px;
+      font-size: 0.9em;
+    }
     .explain-row {
       display: flex;
       gap: 8px;
@@ -5138,6 +5203,232 @@ export class HaInsightsCard extends LitElement {
    *  for the "fix it manually" path. Raw payload moves behind a
    *  <details> disclosure for power users. Apply ─ which is a no-op
    *  for an observation-only audit ─ is hidden entirely. */
+  /** v1.12.8 — Specialized body renderer for v1.7+ detectors that
+   *  use `payload_format="card"` but were previously falling through
+   *  to the generic _renderPayloadView (raw JSON dump in the modal).
+   *
+   *  Dispatches on payload key (`_state_shift` / `_physical_device_link`
+   *  / `_location_proposal`) to a per-type formatted body. New
+   *  detectors that add a `_<name>` key to their payload should get a
+   *  matching branch added here. Returns `nothing` when no
+   *  specialized renderer matches — caller falls back to generic.
+   *
+   *  Why dispatch on payload key vs detector name: detector renaming
+   *  shouldn't break the renderer, and the payload key is the
+   *  contract the integration's CHANGELOG advertises (e.g. v1.11.0
+   *  added "_physical_device_link" block).
+   */
+  private _hasSpecializedCardRenderer(insight: Insight): boolean {
+    const payload = (insight.payload ?? {}) as Record<string, unknown>;
+    return !!(
+      payload._state_shift ||
+      payload._physical_device_link ||
+      payload._location_proposal
+    );
+  }
+
+  private _renderCardBody(insight: Insight): TemplateResult | typeof nothing {
+    const payload = (insight.payload ?? {}) as Record<string, unknown>;
+    if (payload._state_shift) {
+      return this._renderStateShiftBody(
+        insight,
+        payload._state_shift as Record<string, unknown>,
+      );
+    }
+    if (payload._physical_device_link) {
+      return this._renderPhysicalDeviceLinkBody(
+        insight,
+        payload._physical_device_link as Record<string, unknown>,
+      );
+    }
+    if (payload._location_proposal) {
+      return this._renderLocationProposalBody(
+        insight,
+        payload._location_proposal as Record<string, unknown>,
+      );
+    }
+    return nothing;
+  }
+
+  /** v1.8.2 StateShiftDetector — "Daily-count for X shifted on YYYY-MM-DD." */
+  private _renderStateShiftBody(
+    insight: Insight,
+    block: Record<string, unknown>,
+  ): TemplateResult {
+    const shiftDate = (block.shift_date as string) ?? "(unknown date)";
+    const preMean = block.pre_shift_mean_per_day as number | undefined;
+    const postMean = block.post_shift_mean_per_day as number | undefined;
+    const daysAgo = block.days_ago as number | undefined;
+    const magnitude = block.magnitude as number | undefined;
+    const confidencePct = Math.round(insight.confidence * 100);
+    return html`
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">state shift</span>
+          ${insight.maturity === "beta"
+            ? html`<span class="pill" style="color: var(--warning-color)">🟡 BETA</span>`
+            : nothing}
+        </div>
+        <h4>Routine shift detected</h4>
+        <div class="state-shift-summary">
+          <div class="state-shift-line">
+            <span class="state-shift-label">Date:</span>
+            <span class="state-shift-value">${shiftDate}${daysAgo != null ? html` (~${daysAgo} days ago)` : nothing}</span>
+          </div>
+          <div class="state-shift-line">
+            <span class="state-shift-label">Before:</span>
+            <span class="state-shift-value">${preMean != null ? html`~${preMean.toFixed(1)}/day` : "—"}</span>
+          </div>
+          <div class="state-shift-line">
+            <span class="state-shift-label">After:</span>
+            <span class="state-shift-value">${postMean != null ? html`~${postMean.toFixed(1)}/day` : "—"}</span>
+          </div>
+          ${magnitude != null
+            ? html`<div class="state-shift-line">
+                <span class="state-shift-label">Shift magnitude:</span>
+                <span class="state-shift-value">${magnitude.toFixed(1)}</span>
+              </div>`
+            : nothing}
+        </div>
+        ${insight.explanation
+          ? html`<div class="explanation">${insight.explanation}</div>`
+          : nothing}
+      </div>
+    `;
+  }
+
+  /** v1.11.0 PhysicalDeviceLinkDetector — "X and Y look like the same physical device." */
+  private _renderPhysicalDeviceLinkBody(
+    insight: Insight,
+    block: Record<string, unknown>,
+  ): TemplateResult {
+    // v1.12.7 rename: entity_id / peer_entity_id (canonical sort).
+    // Older insights stored entity_a / entity_b — handle both for
+    // backward compat with cached insights from pre-v1.12.7 server.
+    const entityId =
+      (block.entity_id as string | undefined) ??
+      (block.entity_a as string | undefined) ??
+      "?";
+    const peerEntityId =
+      (block.peer_entity_id as string | undefined) ??
+      (block.entity_b as string | undefined) ??
+      "?";
+    const r = block.pearson_r as number | undefined;
+    const nSamples = block.n_aligned_samples as number | undefined;
+    const bestLagBins = block.best_lag_bins as number | undefined;
+    const deviceClass = (block.device_class as string) ?? "—";
+    const lookbackDays = block.lookback_days as number | undefined;
+    const confidencePct = Math.round(insight.confidence * 100);
+    return html`
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">device link</span>
+          ${insight.maturity === "beta"
+            ? html`<span class="pill" style="color: var(--warning-color)">🟡 BETA</span>`
+            : nothing}
+        </div>
+        <h4>These look like the same physical device</h4>
+        <div class="device-link-pair">
+          <code class="device-link-eid">${entityId}</code>
+          <span class="device-link-arrow">↔</span>
+          <code class="device-link-eid">${peerEntityId}</code>
+        </div>
+        <div class="state-shift-summary">
+          <div class="state-shift-line">
+            <span class="state-shift-label">Pearson r:</span>
+            <span class="state-shift-value">${r != null ? r.toFixed(3) : "—"}</span>
+          </div>
+          <div class="state-shift-line">
+            <span class="state-shift-label">Aligned samples:</span>
+            <span class="state-shift-value">${nSamples ?? "—"} (${lookbackDays ?? "?"}-day lookback)</span>
+          </div>
+          <div class="state-shift-line">
+            <span class="state-shift-label">Device class:</span>
+            <span class="state-shift-value">${deviceClass}</span>
+          </div>
+          ${bestLagBins != null && bestLagBins !== 0
+            ? html`<div class="state-shift-line">
+                <span class="state-shift-label">Detected at lag:</span>
+                <span class="state-shift-value">${bestLagBins} bin${bestLagBins === 1 || bestLagBins === -1 ? "" : "s"} (likely clock drift between integrations)</span>
+              </div>`
+            : nothing}
+        </div>
+        ${insight.explanation
+          ? html`<div class="explanation">${insight.explanation}</div>`
+          : nothing}
+      </div>
+    `;
+  }
+
+  /** v1.11.5 LocationProposalDetector — "X is probably in Living Room." */
+  private _renderLocationProposalBody(
+    insight: Insight,
+    block: Record<string, unknown>,
+  ): TemplateResult {
+    const entityId = (block.entity_id as string) ?? "?";
+    const areaName = (block.proposed_area_name as string) ?? "?";
+    const medianR = block.median_r as number | undefined;
+    const nSiblings = block.n_siblings as number | undefined;
+    const deviceClass = (block.device_class as string) ?? "—";
+    const alternatives = (block.alternatives as Array<{
+      area_id?: string;
+      median_r?: number;
+      n_siblings?: number;
+    }>) ?? [];
+    const confidencePct = Math.round(insight.confidence * 100);
+    const strength =
+      medianR != null && medianR >= 0.9 ? "Almost certainly" : "Probably";
+    return html`
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">location proposal</span>
+          ${insight.maturity === "beta"
+            ? html`<span class="pill" style="color: var(--warning-color)">🟡 BETA</span>`
+            : nothing}
+        </div>
+        <h4>${strength} in ${areaName}</h4>
+        <div class="location-proposal-summary">
+          <div>
+            <code>${entityId}</code> matches
+            ${nSiblings ?? "?"} tagged ${deviceClass}
+            ${nSiblings === 1 ? "sibling" : "siblings"} at median
+            r=${medianR != null ? medianR.toFixed(2) : "?"}.
+          </div>
+        </div>
+        ${alternatives.length > 0
+          ? html`
+              <h4>Alternative areas considered</h4>
+              <ul class="location-alt-list">
+                ${alternatives.map(
+                  (alt) => html`
+                    <li>
+                      <code>${alt.area_id ?? "?"}</code> —
+                      r=${alt.median_r != null ? alt.median_r.toFixed(2) : "?"}
+                      across ${alt.n_siblings ?? "?"} sibling${alt.n_siblings === 1 ? "" : "s"}
+                    </li>
+                  `,
+                )}
+              </ul>
+            `
+          : nothing}
+        ${insight.explanation
+          ? html`<div class="explanation">${insight.explanation}</div>`
+          : nothing}
+        <p class="location-proposal-note">
+          <strong>Advisory only.</strong> This detector never auto-assigns areas.
+          Confirm the suggestion via the bulk-area-assign dialog or override
+          with a different area.
+        </p>
+      </div>
+    `;
+  }
+
   private _renderAuditBody(insight: Insight): TemplateResult {
     const busy = this._busyId === insight.id || this._auditSuggestBusy === insight.id;
     const confidencePct = Math.round(insight.confidence * 100);
@@ -5518,7 +5809,9 @@ export class HaInsightsCard extends LitElement {
               : insight.detector === "automation_audit"
                 && insight.payload_format !== "automation"
                 ? this._renderAuditBody(insight)
-                : html`
+                : this._hasSpecializedCardRenderer(insight)
+                  ? this._renderCardBody(insight)
+                  : html`
                 <div class="dialog-body">
                   ${this._renderModalError()}
                   ${this._renderTestResults()}
