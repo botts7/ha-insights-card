@@ -1706,85 +1706,162 @@ if (!customElements.get("ha-insights-panel")) {
   customElements.define("ha-insights-panel", HaInsightsPanel);
 }
 
-// v1.2.26: HA panel-mount recovery sentinel.
+// v1.3.1: HA panel-mount recovery — fixes the v1.2.26 observer-scope bug.
 //
-// Root cause confirmed via user-supplied DevTools introspection: under
-// certain navigation cycles + browser/HA pairings, HA's `<ha-panel-custom>`
-// wrapper loses its `panel.config` while still being rendered. Without
-// `config.component_name`, HA's resolver doesn't know which custom
-// element to instantiate inside the wrapper, so it stays empty. The
-// resolver also doesn't retry — the user sees a blank page despite
-// `/ha-insights` being the active route.
+// Background: v1.2.26 added a MutationObserver scoped to `document.body`,
+// intending to detect when HA's `<ha-panel-custom>` wrapper ended up empty
+// (either because `panel.config` was lost OR because an `AbortError:
+// Transition was skipped` interrupted the mount).
 //
-// All preconditions for OUR side are correct (the customElements.define
-// ran; our class is registered; the JS bundle is loaded). The bug is
-// entirely in HA's panel-mount machinery losing config state.
+// **The bug**: MutationObservers do NOT cross shadow-root boundaries.
+// `<ha-panel-custom>` is rendered inside `<home-assistant-main>`'s shadow
+// root, never in `document.body`. So the v1.2.26 observer fired on
+// unrelated mutations but never on the one mutation that mattered (the
+// wrapper being inserted into HA's main shadow root).
 //
-// Workaround: a single MutationObserver watches for `<ha-panel-custom>`
-// elements that end up empty on the `/ha-insights*` route, and force-
-// mounts `<ha-insights-panel>` inside them with the hass / narrow / panel
-// props from the wrapper. Idempotent (skips already-mounted wrappers),
-// scoped to our route only, and stops being relevant the moment HA's
-// resolver works correctly. ~30 lines, no behavior change when HA is
-// healthy.
+// Result on user installs: the v1.2.26 initial `tryRecover()` call helped
+// in the rare case where the wrapper already existed at module load
+// (e.g., navigating back to /ha-insights after a previous visit in the
+// same session). But on first navigation post page-load, the wrapper
+// hadn't been inserted yet → initial call returned early → observer
+// never fired → blank panel persisted until hard refresh.
 //
-// Verified via the diagnostic that `wrap.appendChild(document
-// .createElement('ha-insights-panel'))` resurrects the panel: the class
-// instantiates correctly even when HA's `panel.config` is missing,
-// because our element reads everything it needs from `hass` (set on
-// the wrapper) and from its own internal state.
+// **v1.3.1 fixes**:
+// 1. Observe `home-assistant-main`'s shadowRoot directly once it exists
+//    (with a fallback poller for the brief window before HA mounts main).
+// 2. Listen for URL changes (popstate + hashchange + a wrapped pushState)
+//    so we also try right after every navigation.
+// 3. Add a short setInterval backstop for the first 5 seconds after each
+//    URL change — covers the AbortError race where HA inserts the
+//    wrapper but its mount fails silently.
+// 4. Diagnostic counter on `window.__haInsightsPanelRecovery` so future
+//    blank-panel reports include "recovery attempted N times".
+//
+// All idempotent. Scoped to our route only. Zero behavior change when
+// HA's mount works correctly.
 (function installPanelMountRecovery() {
-  if ((window as unknown as { __haInsightsPanelRecovery?: boolean })
-        .__haInsightsPanelRecovery) {
+  type RecoveryState = {
+    installed: true;
+    attempts: number;
+    forcedMounts: number;
+    lastAttemptAt: number;
+  };
+  const RECOVERY_KEY = "__haInsightsPanelRecovery";
+  type WinWithRecovery = Window & { [RECOVERY_KEY]?: RecoveryState | boolean };
+  const win = window as unknown as WinWithRecovery;
+  if (win[RECOVERY_KEY] && (win[RECOVERY_KEY] as RecoveryState).installed) {
     return;  // already installed in this page session
   }
-  (window as unknown as { __haInsightsPanelRecovery?: boolean })
-    .__haInsightsPanelRecovery = true;
+  const state: RecoveryState = {
+    installed: true,
+    attempts: 0,
+    forcedMounts: 0,
+    lastAttemptAt: 0,
+  };
+  win[RECOVERY_KEY] = state;
 
-  const tryRecover = (): void => {
-    // Cheap path-match — avoids touching wrappers for unrelated panels.
-    if (!window.location.pathname.startsWith("/ha-insights")) return;
+  type Wrap = HTMLElement & {
+    hass?: unknown;
+    narrow?: unknown;
+    panel?: unknown;
+  };
 
-    // ha-panel-custom is inside home-assistant-main's shadow DOM. Walk
-    // there explicitly — querySelectorAll doesn't cross shadow boundaries.
+  const findWrapper = (): Wrap | null => {
     const ha = document.querySelector("home-assistant");
     const main = ha?.shadowRoot?.querySelector("home-assistant-main");
-    const wrap = main?.shadowRoot?.querySelector("ha-panel-custom") as
-      | (HTMLElement & {
-          hass?: unknown;
-          narrow?: unknown;
-          panel?: unknown;
-        })
-      | null
-      | undefined;
+    return (main?.shadowRoot?.querySelector("ha-panel-custom") as Wrap)
+      ?? null;
+  };
+
+  const onRoute = (): boolean => {
+    return window.location.pathname.startsWith("/ha-insights");
+  };
+
+  const tryRecover = (): void => {
+    state.attempts += 1;
+    state.lastAttemptAt = Date.now();
+    if (!onRoute()) return;
+    const wrap = findWrapper();
     if (!wrap) return;
-
-    // Already mounted? Done.
     if (wrap.querySelector("ha-insights-panel")) return;
-
-    // Don't fire until our class is actually registered.
     if (!customElements.get("ha-insights-panel")) return;
-
-    // Force-mount. Use `wrap.hass` etc. which HA does populate even when
-    // panel.config is lost (per the diagnostic). Our element renders
-    // without panel.config — it derives everything from hass.
-    const el = document.createElement("ha-insights-panel") as
-      HTMLElement & { hass?: unknown; narrow?: unknown; panel?: unknown };
+    const el = document.createElement("ha-insights-panel") as Wrap;
     el.hass = wrap.hass;
     el.narrow = wrap.narrow;
     el.panel = wrap.panel;
     wrap.appendChild(el);
+    state.forcedMounts += 1;
+    // Single console line so users sending diagnostics can see we
+    // recovered (and how often). Intentionally not behind a debug flag —
+    // forced-mount counts are useful evidence in future bug reports.
+    // eslint-disable-next-line no-console
+    console.info(
+      "[ha-insights] panel mount recovered (forced-mount #"
+      + `${state.forcedMounts}, attempts=${state.attempts})`,
+    );
   };
 
-  // Initial try at module load (covers the "navigate-to-blank-panel"
-  // case where the wrapper is already empty).
-  tryRecover();
+  // Watch the right shadow root — the one HA actually mutates when it
+  // inserts ha-panel-custom. The v1.2.26 observer on document.body
+  // could not see this mutation; cross-shadow-boundary observation
+  // is not supported by the MutationObserver spec.
+  let mainObserver: MutationObserver | null = null;
+  const attachShadowObserver = (): void => {
+    if (mainObserver) return;
+    const ha = document.querySelector("home-assistant");
+    const main = ha?.shadowRoot?.querySelector("home-assistant-main");
+    const shadow = main?.shadowRoot;
+    if (!shadow) return;
+    mainObserver = new MutationObserver(() => tryRecover());
+    mainObserver.observe(shadow, { childList: true, subtree: true });
+  };
 
-  // Ongoing watch — fires when ha-panel-custom gets added or its children
-  // change. Scoped to body subtree, throttled implicitly by browser
-  // MutationObserver batching. Cheap.
-  const observer = new MutationObserver(() => tryRecover());
-  observer.observe(document.body, { childList: true, subtree: true });
+  // The home-assistant-main shadow root may not exist at module load.
+  // Poll briefly until it does, then stop. (Bounded — gives up after
+  // 30s; production HA mounts main in <2s on any healthy install.)
+  const start = Date.now();
+  const shadowPoller = window.setInterval(() => {
+    if (mainObserver || Date.now() - start > 30_000) {
+      window.clearInterval(shadowPoller);
+      return;
+    }
+    attachShadowObserver();
+  }, 250);
+
+  // On URL change → short polling burst to handle the AbortError race:
+  // HA inserts ha-panel-custom but its inner mount silently fails.
+  // 5 seconds × 250ms = 20 chances to catch and recover. Lightweight;
+  // tryRecover bails immediately if route doesn't match or wrapper
+  // already mounted.
+  const burstOnNav = (): void => {
+    if (!onRoute()) return;
+    const navStart = Date.now();
+    const burst = window.setInterval(() => {
+      if (Date.now() - navStart > 5_000) {
+        window.clearInterval(burst);
+        return;
+      }
+      tryRecover();
+    }, 250);
+  };
+
+  // Wrap history.pushState so we hear about programmatic navigation
+  // (HA uses Vaadin Router which calls pushState; vanilla popstate
+  // alone misses these).
+  const origPush = window.history.pushState.bind(window.history);
+  window.history.pushState = function (...args) {
+    const result = origPush(...args);
+    window.dispatchEvent(new Event("ha-insights:navigated"));
+    return result;
+  };
+  window.addEventListener("ha-insights:navigated", burstOnNav);
+  window.addEventListener("popstate", burstOnNav);
+  window.addEventListener("hashchange", burstOnNav);
+
+  // Initial attempts. tryRecover() once now (covers same-session
+  // navigation), and start a burst (covers AbortError on first load).
+  tryRecover();
+  burstOnNav();
 })();
 
 declare global {

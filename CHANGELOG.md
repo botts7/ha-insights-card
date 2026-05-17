@@ -1,5 +1,44 @@
 # Changelog
 
+## [1.3.1] — 2026-05-17
+
+### Fixed
+
+- **Blank panel after HACS update — root cause: MutationObserver
+  scoped to wrong DOM tree.** The v1.2.26 recovery installed an
+  observer on `document.body`, but `<ha-panel-custom>` (the wrapper
+  HA mutates when mounting our panel) lives inside
+  `<home-assistant-main>`'s shadow root. **MutationObservers do not
+  cross shadow-root boundaries** — so the observer fired on
+  unrelated mutations but never saw the one that mattered.
+
+  Symptom: blank `/ha-insights` page after any HACS update; only
+  Ctrl+Shift+R fixed it. User-supplied DevTools diagnostic on
+  2026-05-17 captured the exact state — wrapper present and
+  configured, panel class registered, but `__haInsightsPanelRecovery`
+  sentinel never installed → recovery code from v1.2.26 was simply
+  not in the loaded bundle, AND when it WAS loaded its observer was
+  on the wrong tree.
+
+  v1.3.1 ships a properly-scoped recovery:
+  1. Observer attached to `home-assistant-main`'s shadowRoot
+     directly (with a 30s poll backstop covering the brief window
+     before HA mounts main).
+  2. URL-change listeners (`popstate`, `hashchange`, wrapped
+     `pushState` for Vaadin Router) trigger recovery on every
+     navigation.
+  3. 5-second polling burst after each navigation to catch the
+     `AbortError: Transition was skipped` race where HA inserts
+     the wrapper but its inner mount silently fails.
+  4. `window.__haInsightsPanelRecovery` is now a state object
+     `{installed, attempts, forcedMounts, lastAttemptAt}` instead
+     of a boolean — future blank-panel reports can read counts.
+  5. Logs `[ha-insights] panel mount recovered (forced-mount #N,
+     attempts=M)` when recovery fires, so users can see it working.
+
+  All idempotent, scoped to `/ha-insights*` only, zero behavior
+  change when HA's mount works correctly.
+
 ## [1.3.0] — 2026-05-17
 
 ### Added
