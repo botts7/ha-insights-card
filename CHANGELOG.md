@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.10.1] — 2026-05-17
+
+### Changed
+
+- **Align Find-My-Device button maturity badges with the existing
+  insight-feed maturity pills.** The 🟡 BETA / 🧪 EXPERIMENTAL
+  convention from `_renderMaturityPill` (insight feed) is now
+  reused by the inline button badges:
+
+  - `👆 🟡 BETA` (touch test) — was `BETA` on blue
+  - `📡 🧪 EXP` (BLE live-find) — was `EXP` on orange
+  - Modal header `🧪 EXPERIMENTAL` pill — color aligned
+
+  Single visual language for maturity across the whole UI. No new
+  features; just removes the duplicate maturity convention
+  introduced in v1.10.0.
+
 ## [1.10.0] — 2026-05-17
 
 ### Added — 📡 BLE live-find + explicit maturity tags
