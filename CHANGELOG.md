@@ -1,5 +1,45 @@
 # Changelog
 
+## [1.4.0] — 2026-05-17
+
+### Added
+
+- **🔀 Directionality badge** for `lagged_correlation` insights.
+  Renders the `_directionality` payload stamped by integration
+  v1.9.1 (transfer entropy direction check). Three states with
+  distinct icons + tooltips:
+
+  - **✅ direction confirmed** — TE(X→Y) dominates with non-trivial
+    flow; the suggestion is well-grounded.
+  - **⚠️ direction reversed** — TE(Y→X) dominates; the proposed
+    leader looks like the FOLLOWER. The integration already demotes
+    these ×0.5 (usually below MIN_CONFIDENCE_TO_EMIT) but if one
+    slips through the user sees the warning.
+  - **🔀 no clear direction** — both directions have flow; both
+    entities probably driven by a third factor (time of day, manual
+    ritual, an unseen scene) rather than by each other.
+
+  Skipped entirely when assessment didn't run (`assessed: false`)
+  or both TE values are below the noise floor (uninformative —
+  surfacing a badge would be misleading). Noise-floor constant
+  (0.05 bits) is kept in sync with `NOISE_FLOOR_BITS` in
+  `custom_components/ha_insights/lib/transfer_entropy.py`.
+
+  Tooltip carries the actual TE values so power users can verify
+  the integration's call.
+
+  Rendered in both the row view and the detail dialog, next to
+  the 🔗 coupling badge. Panel embeds the card via the
+  `ha-insights-card-bundled` alias, so the panel surface
+  inherits automatically — no panel changes needed.
+
+### Notes for integration users
+
+Requires integration **v1.9.1+** to see any badge — older
+integrations don't stamp the payload key. With v1.9.1+ installed,
+existing `lagged_correlation` insights show the badge on next scan
+(no card cache flush needed).
+
 ## [1.3.6] — 2026-05-17
 
 ### Added

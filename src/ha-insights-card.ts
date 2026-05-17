@@ -3622,6 +3622,7 @@ export class HaInsightsCard extends LitElement {
         <div class="row-title">
           ${this._displayTitle(insight)}
           ${this._renderCouplingBadge(insight)}
+          ${this._renderDirectionalityBadge(insight)}
           ${hasCohort
             ? html` <button
                 class="pill-action"
@@ -3949,6 +3950,103 @@ export class HaInsightsCard extends LitElement {
       /\s*(?:Automate\s+(?:this|it)\??|Build\s+automation\??)\s*$/i,
       "",
     ).trim();
+  }
+
+  /** v1.4 (integration v1.9.1+): 🔀 directionality badge for
+   *  lagged_correlation pairs.
+   *
+   *  The integration runs transfer entropy on every detected pair
+   *  (`lib/transfer_entropy.py`) and stamps the result on the payload.
+   *  We render three states, each with a distinct visual:
+   *
+   *  - **direction "x_to_y"** with non-trivial flow → ✅ "direction
+   *    confirmed" (positive signal — the suggestion is well-grounded).
+   *  - **direction "y_to_x"** with non-trivial flow → ⚠️ "direction
+   *    looks reversed" (the proposed leader is actually the follower;
+   *    the integration already demoted confidence ×0.5 so it usually
+   *    falls below MIN_CONFIDENCE_TO_EMIT, but if one slipped through
+   *    the user should know).
+   *  - **direction "symmetric"** with both TEs above noise → 🔀
+   *    "no clear direction" (both entities probably driven by a
+   *    third factor like time of day, not by each other).
+   *
+   *  We skip rendering entirely when:
+   *    - assessment wasn't run (`assessed: false`)
+   *    - both TEs are below the noise floor (uninformative — usually
+   *      sparse data; surfacing a badge would be misleading)
+   *
+   *  The integration is the source of truth for *what* to demote;
+   *  the card is the source of truth for *how* to surface the
+   *  rationale to the user. See `lib/transfer_entropy.py` and
+   *  `detectors/lagged_correlation.py`.
+   */
+  private _renderDirectionalityBadge(insight: Insight): unknown {
+    const payload = insight.payload ?? {};
+    const dir = (payload as Record<string, unknown>)._directionality as
+      | {
+          assessed?: boolean;
+          direction?: string;
+          te_x_to_y?: number;
+          te_y_to_x?: number;
+          asymmetry?: number;
+          confidence?: number;
+          n_samples?: number;
+        }
+      | undefined;
+    if (!dir || dir.assessed !== true) return nothing;
+    // Noise-floor cutoff matches NOISE_FLOOR_BITS in lib/transfer_entropy.py.
+    // Mismatching this would surface badges the integration considered
+    // uninformative — keep them in sync.
+    const NOISE_FLOOR_BITS = 0.05;
+    const txy = typeof dir.te_x_to_y === "number" ? dir.te_x_to_y : 0;
+    const tyx = typeof dir.te_y_to_x === "number" ? dir.te_y_to_x : 0;
+    if (txy < NOISE_FLOOR_BITS && tyx < NOISE_FLOOR_BITS) return nothing;
+
+    let icon = "🔀";
+    let label = "no clear direction";
+    let tooltip = "";
+    switch (dir.direction) {
+      case "x_to_y":
+        icon = "✅";
+        label = "direction confirmed";
+        tooltip = (
+          `Transfer entropy ${txy.toFixed(2)} bits (forward) vs `
+          + `${tyx.toFixed(2)} bits (reverse) — the leader's past `
+          + "genuinely reduces uncertainty about the follower's future. "
+          + "This suggestion is well-grounded."
+        );
+        break;
+      case "y_to_x":
+        icon = "⚠️";
+        label = "direction reversed";
+        tooltip = (
+          `Transfer entropy ${tyx.toFixed(2)} bits (reverse) vs `
+          + `${txy.toFixed(2)} bits (forward) — the proposed leader `
+          + "looks like the FOLLOWER. The entities may be mislabeled "
+          + "or the causation runs the other way. Inspect before applying."
+        );
+        break;
+      case "symmetric":
+        icon = "🔀";
+        label = "no clear direction";
+        tooltip = (
+          `Forward and reverse transfer entropy are similar `
+          + `(${txy.toFixed(2)} vs ${tyx.toFixed(2)} bits) — both `
+          + "entities are probably driven by a third factor (time of "
+          + "day, a manual ritual, an unseen scene) rather than by "
+          + "each other. Consider whether automation adds value."
+        );
+        break;
+      default:
+        return nothing;
+    }
+    return html`<span
+      class="pill-action directionality-badge"
+      style="margin-left:6px;"
+      role="img"
+      aria-label="${tooltip}"
+      title="${tooltip}"
+    >${icon} ${label}</span>`;
   }
 
   /** v1.7: 🔗 badge for tight-coupled pairs.
@@ -5401,6 +5499,7 @@ export class HaInsightsCard extends LitElement {
             <div class="dialog-title">
               ${this._displayTitle(insight)}
               ${this._renderCouplingBadge(insight)}
+              ${this._renderDirectionalityBadge(insight)}
             </div>
             <button
               class="dialog-close"
