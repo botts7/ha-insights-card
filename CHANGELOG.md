@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.3.6] — 2026-05-17
+
+### Added
+
+- **🔇 Per-device "Suppress device" toggle** in the insight detail
+  dialog. New "Devices" section lists every device this insight
+  references — each row has a toggle that adds/removes the device
+  from the integration's managed-externally set.
+
+  Once suppressed, future patterns from that device are filtered
+  out of detector output entirely. Companion to the 🔗 coupling
+  badge: the badge INFERS device-coupling from timing; this is
+  the explicit user assertion.
+
+  Optimistic UI: clicking the toggle flips the local state
+  immediately, then calls `home_insights/set_device_managed` in
+  the background. On failure, the toggle reverts.
+
+  Section renders only when the insight carries
+  `referenced_devices` (server v1.7.8+). On older servers the
+  section is silently absent.
+
+- New `ReferencedDevice` type in `types.ts` mirroring the
+  server's per-insight enrichment shape.
+
+### Pairs with
+
+Integration v1.7.8 ships the backend (filter + WS endpoints +
+OptionsFlow management screen). Without it the toggle calls
+fail; with it, in-context suppression is one click.
+
 ## [1.3.4] — 2026-05-17
 
 ### Fixed

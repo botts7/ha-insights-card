@@ -19,6 +19,17 @@ export type PayloadFormat =
   | "scene"
   | "report";
 
+export interface ReferencedDevice {
+  /** HA device_registry id. Stable across renames. */
+  device_id: string;
+  /** Display name (user override > device.name > short id fallback). */
+  name: string;
+  /** v1.7.7: user has flagged this device "managed externally" — insights
+   * referencing entities on this device are filtered out of future
+   * scans. Toggleable via `home_insights/set_device_managed`. */
+  managed: boolean;
+}
+
 export interface Insight {
   id: string;
   kind: InsightKind;
@@ -100,6 +111,11 @@ export interface Insight {
    *  for stable group_by ordering. Empty array when the entity has no
    *  labels OR the registry doesn't have the labels module. */
   labels?: string[];
+  /** v1.7.7: every device this insight references. Deduped; entities
+   * with no device_id (template sensors / helpers) are excluded.
+   * Powers the per-device "managed externally" toggle in the detail
+   * dialog. Always present from server v1.7.7+; older servers omit. */
+  referenced_devices?: ReferencedDevice[];
   /** v1.5.46: ISO timestamp when the user retired this insight, or
    *  null. Retired = permanent "don't auto-suggest" decision.
    *  Distinct from dismissed (one-off "not relevant"). Only surfaced
