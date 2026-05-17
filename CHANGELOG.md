@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.6.0] — 2026-05-17
+
+### Added
+
+- **🔆 Identify button in bulk-area-assign rows.** When an entity
+  supports a built-in identify signal (lights with FLASH or any
+  brightness, media players, sirens, switches), a small 🔆 button
+  appears next to its name. Click → fires
+  `home_insights/identify_entity` (requires HA Insights v1.10.0+)
+  → the device flashes / chimes / chirps / clicks so you can find
+  it physically.
+
+  Closes the Find-My-Device phase A loop: name_quality scoring
+  (v1.5.0) tells you WHICH entities you don't recognize; this
+  button helps you go find them.
+
+  Per-button state cycle:
+  - 🔆 **idle** — clickable; tooltip describes the signal that
+    will fire ("flash the light briefly")
+  - ⏳ **pending** — request in flight; disabled to prevent
+    double-firing
+  - ✓ **success** — call succeeded; tooltip shows what was done
+    ("Done: flash the light briefly (1 call)"); auto-clears to
+    idle after 3 s so you can re-fire if you missed it
+  - ✗ **failed** — server-side error; tooltip shows the message;
+    auto-clears after 3 s
+
+  Hidden entirely for entities without a supported identify
+  method (passive sensors, scripts, etc.) — those are the v1.10
+  Phase B perturbation target.
+
+### Requires
+
+HA Insights integration **v1.10.0+**. Falls back gracefully on
+older / vanilla HA installs: the button just doesn't render
+(same try/catch that protects v1.5.0's smart sort).
+
 ## [1.5.0] — 2026-05-17
 
 ### Added
