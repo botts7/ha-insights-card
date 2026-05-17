@@ -1823,6 +1823,26 @@ if (!customElements.get("ha-insights-panel")) {
     return removed;
   };
 
+  // v1.3.5: gate the actual force-mount behind a 600ms grace timer.
+  //
+  // Why: HA's `<ha-panel-custom>._createPanel` dynamically imports the
+  // module and only appends the panel element AFTER the import resolves
+  // (~10–50ms on a warm cache). Our `mainObserver` fires the instant HA
+  // inserts the empty `<ha-panel-custom>` wrapper into the main shadow
+  // root — at which point the wrapper has 0 children because HA's
+  // import `.then` hasn't run yet. v1.3.4 tryRecover would observe the
+  // empty wrapper and force-mount immediately, then HA's `.then` would
+  // append a second copy ~15ms later, which dedupe would clean up.
+  // forcedMounts incremented spuriously on every nav even though HA's
+  // mount was working.
+  //
+  // 600ms grace is comfortably above HA's typical mount latency on a
+  // warm cache and matches the spirit of the existing 500ms burstOnNav
+  // delay. If HA succeeds in the grace window, the deferred check sees
+  // a non-empty wrapper and no-ops. If HA genuinely fails, the deferred
+  // check force-mounts as before.
+  let pendingRecoveryTimer: number | null = null;
+  const MOUNT_GRACE_MS = 600;
   const tryRecover = (): void => {
     state.attempts += 1;
     state.lastAttemptAt = Date.now();
@@ -1834,20 +1854,34 @@ if (!customElements.get("ha-insights-panel")) {
     dedupePanels(wrap);
     if (wrap.querySelector("ha-insights-panel")) return;
     if (!customElements.get("ha-insights-panel")) return;
-    const el = document.createElement("ha-insights-panel") as Wrap;
-    el.hass = wrap.hass;
-    el.narrow = wrap.narrow;
-    el.panel = wrap.panel;
-    wrap.appendChild(el);
-    state.forcedMounts += 1;
-    // Single console line so users sending diagnostics can see we
-    // recovered (and how often). Intentionally not behind a debug flag —
-    // forced-mount counts are useful evidence in future bug reports.
-    // eslint-disable-next-line no-console
-    console.info(
-      "[ha-insights] panel mount recovered (forced-mount #"
-      + `${state.forcedMounts}, attempts=${state.attempts})`,
-    );
+    // Wrapper is empty. Schedule a deferred re-check rather than
+    // force-mounting immediately. Idempotent: a pending timer absorbs
+    // additional observer hits for the same empty window.
+    if (pendingRecoveryTimer !== null) return;
+    pendingRecoveryTimer = window.setTimeout(() => {
+      pendingRecoveryTimer = null;
+      if (!onRoute()) return;
+      const w = findWrapper();
+      if (!w) return;
+      dedupePanels(w);
+      if (w.querySelector("ha-insights-panel")) return;  // HA succeeded
+      if (!customElements.get("ha-insights-panel")) return;
+      const el = document.createElement("ha-insights-panel") as Wrap;
+      el.hass = w.hass;
+      el.narrow = w.narrow;
+      el.panel = w.panel;
+      w.appendChild(el);
+      state.forcedMounts += 1;
+      // Single console line so users sending diagnostics can see we
+      // recovered (and how often). Intentionally not behind a debug
+      // flag — forced-mount counts are useful evidence in future bug
+      // reports.
+      // eslint-disable-next-line no-console
+      console.info(
+        "[ha-insights] panel mount recovered (forced-mount #"
+        + `${state.forcedMounts}, attempts=${state.attempts})`,
+      );
+    }, MOUNT_GRACE_MS);
   };
 
   // Watch the right shadow root — the one HA actually mutates when it
@@ -1877,28 +1911,15 @@ if (!customElements.get("ha-insights-panel")) {
     attachShadowObserver();
   }, 250);
 
-  // On URL change → short polling burst to handle the AbortError race:
-  // HA inserts ha-panel-custom but its inner mount silently fails.
-  // 5 seconds × 250ms = 20 chances to catch and recover. Lightweight;
-  // tryRecover bails immediately if route doesn't match or wrapper
-  // already mounted.
-  //
-  // v1.3.3: first iteration is delayed 500ms so HA's normal mount has
-  // time to complete first. v1.3.1 raced HA — both mounted, resulting
-  // in two stacked panels until the user dedupe-d manually.
+  // On URL change → one tryRecover. v1.3.5: tryRecover now self-gates
+  // with a 600ms grace timer, so we no longer need the 5s × 250ms
+  // polling burst. A single call schedules the deferred check; if HA's
+  // normal mount succeeds in the grace window, the deferred check
+  // no-ops. The mainObserver covers the case where HA mounts the
+  // wrapper after this nav event but before our deferred check fires.
   const burstOnNav = (): void => {
     if (!onRoute()) return;
-    const navStart = Date.now();
-    const burst = window.setInterval(() => {
-      if (Date.now() - navStart > 5_000) {
-        window.clearInterval(burst);
-        return;
-      }
-      // Skip the first 500ms — give HA's resolver the chance to mount
-      // normally. Only force-mount after that window.
-      if (Date.now() - navStart < 500) return;
-      tryRecover();
-    }, 250);
+    tryRecover();
   };
 
   // Wrap history.pushState so we hear about programmatic navigation

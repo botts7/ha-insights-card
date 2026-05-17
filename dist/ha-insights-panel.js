@@ -1618,6 +1618,16 @@ class HaInsightsCard extends i {
       font-size: 0.95em;
       color: var(--secondary-text-color);
     }
+    .coupling-badge {
+      cursor: help;
+      background: var(--info-color, #4a90e2);
+      color: var(--text-primary-color, #fff);
+      border-color: var(--info-color, #4a90e2);
+      opacity: 0.85;
+    }
+    .coupling-badge:hover {
+      opacity: 1.0;
+    }
     .pill-action:hover {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.06));
     }
@@ -4409,6 +4419,7 @@ class HaInsightsCard extends i {
       <div class="row" @click=${() => this._openDialog(insight.id)}>
         <div class="row-title">
           ${this._displayTitle(insight)}
+          ${this._renderCouplingBadge(insight)}
           ${hasCohort
             ? b ` <button
                 class="pill-action"
@@ -4709,6 +4720,41 @@ class HaInsightsCard extends i {
         if (insight.conflicts_with.length === 0)
             return insight.title;
         return insight.title.replace(/\s*(?:Automate\s+(?:this|it)\??|Build\s+automation\??)\s*$/i, "").trim();
+    }
+    /** v1.7: 🔗 badge for tight-coupled pairs.
+     *
+     *  Cooccurrence / lagged / button-press detectors stamp a `_coupling`
+     *  block on the payload when the leader→follower lag looks like
+     *  device-internal logic (ESPHome on_press, Z-Wave central scene,
+     *  Zigbee binding) rather than a real user habit. We render the
+     *  badge only for TIGHT tier — LOOSE is too ambiguous to surface,
+     *  NONE is the normal case.
+     *
+     *  The integration also demotes confidence on TIGHT pairs so they
+     *  rank below uncoupled suggestions; the badge tells the user
+     *  WHY the insight is muted rather than hidden.
+     */
+    _renderCouplingBadge(insight) {
+        const payload = insight.payload ?? {};
+        const coupling = payload._coupling;
+        if (!coupling || coupling.tier !== "TIGHT")
+            return A;
+        const lag = typeof coupling.median_lag_ms === "number"
+            ? `${Math.round(coupling.median_lag_ms)}ms`
+            : "<unknown>";
+        const cons = typeof coupling.consistency === "number"
+            ? `${Math.round(coupling.consistency * 100)}%`
+            : "<unknown>";
+        const tooltip = (`These entities change together within ~${lag} `
+            + `(${cons} consistency) — looks like a device binding or a `
+            + "pre-existing automation, not a new pattern to automate.");
+        return b `<span
+      class="pill-action coupling-badge"
+      style="margin-left:6px;"
+      role="img"
+      aria-label="${tooltip}"
+      title="${tooltip}"
+    >🔗 coupled</span>`;
     }
     /** Render an "🔁 already automated" or "🤖 in N automations" pill.
      *
@@ -5898,7 +5944,10 @@ class HaInsightsCard extends i {
       <div class="dialog-backdrop" @click=${this._closeDialog}>
         <div class="dialog" @click=${(e) => e.stopPropagation()}>
           <div class="dialog-header">
-            <div class="dialog-title">${this._displayTitle(insight)}</div>
+            <div class="dialog-title">
+              ${this._displayTitle(insight)}
+              ${this._renderCouplingBadge(insight)}
+            </div>
             <button
               class="dialog-close"
               aria-label="Close"
@@ -6347,6 +6396,27 @@ if (!window.customCards.some((c) => c.type === "ha-insights-card")) {
     });
 }
 
+// v1.3.4: register a panel-bundled alias of the card so the panel
+// ALWAYS uses the version of HaInsightsCard built INTO this bundle —
+// never the (possibly stale) HACS-installed `ha-insights-card` whose
+// class registered first and won the `ha-insights-card` name.
+//
+// Real-install diagnostic on 2026-05-17 confirmed: card v1.3.0+
+// added the 🔗 coupling badge to _renderRow, but users on the side
+// panel never saw it because the HACS-loaded card (registered first)
+// owned the `ha-insights-card` element name. The panel embedded that
+// stale class. customElements doesn't allow re-defining a name once
+// taken, so the fresh bundled class was silently discarded.
+//
+// Solution: panel uses `ha-insights-card-bundled`, registered as a
+// trivial subclass of the freshly-built HaInsightsCard from this
+// bundle. Always current with the integration's panel.js, regardless
+// of what HACS has done with the dashboard card.
+const PANEL_CARD_TAG = "ha-insights-card-bundled";
+if (!customElements.get(PANEL_CARD_TAG)) {
+    customElements.define(PANEL_CARD_TAG, class extends HaInsightsCard {
+    });
+}
 class HaInsightsPanel extends i {
     constructor() {
         super(...arguments);
@@ -7841,11 +7911,15 @@ class HaInsightsPanel extends i {
         // which destroyed the card's internal state mid-refine (modal closed,
         // result discarded). Lit's html template diffs by tag + position; same
         // tag in the same slot = same element preserved.
+        // v1.3.4: use the panel-bundled alias (ha-insights-card-bundled)
+        // so the panel ALWAYS uses the freshly-built class from this
+        // bundle — never a stale HACS-installed ha-insights-card that
+        // claimed the element name first.
         return b `
-      <ha-insights-card
+      <ha-insights-card-bundled
         .hass=${this.hass}
         .config=${this._embeddedCardConfig}
-      ></ha-insights-card>
+      ></ha-insights-card-bundled>
     `;
     }
 }
@@ -7972,74 +8046,202 @@ __decorate([
 if (!customElements.get("ha-insights-panel")) {
     customElements.define("ha-insights-panel", HaInsightsPanel);
 }
-// v1.2.26: HA panel-mount recovery sentinel.
+// v1.3.1: HA panel-mount recovery — fixes the v1.2.26 observer-scope bug.
 //
-// Root cause confirmed via user-supplied DevTools introspection: under
-// certain navigation cycles + browser/HA pairings, HA's `<ha-panel-custom>`
-// wrapper loses its `panel.config` while still being rendered. Without
-// `config.component_name`, HA's resolver doesn't know which custom
-// element to instantiate inside the wrapper, so it stays empty. The
-// resolver also doesn't retry — the user sees a blank page despite
-// `/ha-insights` being the active route.
+// Background: v1.2.26 added a MutationObserver scoped to `document.body`,
+// intending to detect when HA's `<ha-panel-custom>` wrapper ended up empty
+// (either because `panel.config` was lost OR because an `AbortError:
+// Transition was skipped` interrupted the mount).
 //
-// All preconditions for OUR side are correct (the customElements.define
-// ran; our class is registered; the JS bundle is loaded). The bug is
-// entirely in HA's panel-mount machinery losing config state.
+// **The bug**: MutationObservers do NOT cross shadow-root boundaries.
+// `<ha-panel-custom>` is rendered inside `<home-assistant-main>`'s shadow
+// root, never in `document.body`. So the v1.2.26 observer fired on
+// unrelated mutations but never on the one mutation that mattered (the
+// wrapper being inserted into HA's main shadow root).
 //
-// Workaround: a single MutationObserver watches for `<ha-panel-custom>`
-// elements that end up empty on the `/ha-insights*` route, and force-
-// mounts `<ha-insights-panel>` inside them with the hass / narrow / panel
-// props from the wrapper. Idempotent (skips already-mounted wrappers),
-// scoped to our route only, and stops being relevant the moment HA's
-// resolver works correctly. ~30 lines, no behavior change when HA is
-// healthy.
+// Result on user installs: the v1.2.26 initial `tryRecover()` call helped
+// in the rare case where the wrapper already existed at module load
+// (e.g., navigating back to /ha-insights after a previous visit in the
+// same session). But on first navigation post page-load, the wrapper
+// hadn't been inserted yet → initial call returned early → observer
+// never fired → blank panel persisted until hard refresh.
 //
-// Verified via the diagnostic that `wrap.appendChild(document
-// .createElement('ha-insights-panel'))` resurrects the panel: the class
-// instantiates correctly even when HA's `panel.config` is missing,
-// because our element reads everything it needs from `hass` (set on
-// the wrapper) and from its own internal state.
+// **v1.3.1 fixes**:
+// 1. Observe `home-assistant-main`'s shadowRoot directly once it exists
+//    (with a fallback poller for the brief window before HA mounts main).
+// 2. Listen for URL changes (popstate + hashchange + a wrapped pushState)
+//    so we also try right after every navigation.
+// 3. Add a short setInterval backstop for the first 5 seconds after each
+//    URL change — covers the AbortError race where HA inserts the
+//    wrapper but its mount fails silently.
+// 4. Diagnostic counter on `window.__haInsightsPanelRecovery` so future
+//    blank-panel reports include "recovery attempted N times".
+//
+// All idempotent. Scoped to our route only. Zero behavior change when
+// HA's mount works correctly.
 (function installPanelMountRecovery() {
-    if (window
-        .__haInsightsPanelRecovery) {
+    const RECOVERY_KEY = "__haInsightsPanelRecovery";
+    const win = window;
+    if (win[RECOVERY_KEY] && win[RECOVERY_KEY].installed) {
         return; // already installed in this page session
     }
-    window
-        .__haInsightsPanelRecovery = true;
-    const tryRecover = () => {
-        // Cheap path-match — avoids touching wrappers for unrelated panels.
-        if (!window.location.pathname.startsWith("/ha-insights"))
-            return;
-        // ha-panel-custom is inside home-assistant-main's shadow DOM. Walk
-        // there explicitly — querySelectorAll doesn't cross shadow boundaries.
+    const state = {
+        installed: true,
+        attempts: 0,
+        forcedMounts: 0,
+        lastAttemptAt: 0,
+    };
+    win[RECOVERY_KEY] = state;
+    const findWrapper = () => {
         const ha = document.querySelector("home-assistant");
         const main = ha?.shadowRoot?.querySelector("home-assistant-main");
-        const wrap = main?.shadowRoot?.querySelector("ha-panel-custom");
+        return main?.shadowRoot?.querySelector("ha-panel-custom")
+            ?? null;
+    };
+    const onRoute = () => {
+        return window.location.pathname.startsWith("/ha-insights");
+    };
+    // v1.3.3: dedupe pass. If two ha-insights-panel ended up siblings
+    // (HA's normal resolver + our recovery both fired), keep the first
+    // and remove the rest. Idempotent.
+    const dedupePanels = (wrap) => {
+        const panels = wrap.querySelectorAll("ha-insights-panel");
+        if (panels.length <= 1)
+            return 0;
+        let removed = 0;
+        for (let i = 1; i < panels.length; i++) {
+            panels[i].remove();
+            removed += 1;
+        }
+        // eslint-disable-next-line no-console
+        console.info(`[ha-insights] removed ${removed} duplicate panel element(s)`);
+        return removed;
+    };
+    // v1.3.5: gate the actual force-mount behind a 600ms grace timer.
+    //
+    // Why: HA's `<ha-panel-custom>._createPanel` dynamically imports the
+    // module and only appends the panel element AFTER the import resolves
+    // (~10–50ms on a warm cache). Our `mainObserver` fires the instant HA
+    // inserts the empty `<ha-panel-custom>` wrapper into the main shadow
+    // root — at which point the wrapper has 0 children because HA's
+    // import `.then` hasn't run yet. v1.3.4 tryRecover would observe the
+    // empty wrapper and force-mount immediately, then HA's `.then` would
+    // append a second copy ~15ms later, which dedupe would clean up.
+    // forcedMounts incremented spuriously on every nav even though HA's
+    // mount was working.
+    //
+    // 600ms grace is comfortably above HA's typical mount latency on a
+    // warm cache and matches the spirit of the existing 500ms burstOnNav
+    // delay. If HA succeeds in the grace window, the deferred check sees
+    // a non-empty wrapper and no-ops. If HA genuinely fails, the deferred
+    // check force-mounts as before.
+    let pendingRecoveryTimer = null;
+    const MOUNT_GRACE_MS = 600;
+    const tryRecover = () => {
+        state.attempts += 1;
+        state.lastAttemptAt = Date.now();
+        if (!onRoute())
+            return;
+        const wrap = findWrapper();
         if (!wrap)
             return;
-        // Already mounted? Done.
+        // v1.3.3: always dedupe first. If HA's resolver mounted alongside
+        // our recovery (race), clean up before deciding whether to mount.
+        dedupePanels(wrap);
         if (wrap.querySelector("ha-insights-panel"))
             return;
-        // Don't fire until our class is actually registered.
         if (!customElements.get("ha-insights-panel"))
             return;
-        // Force-mount. Use `wrap.hass` etc. which HA does populate even when
-        // panel.config is lost (per the diagnostic). Our element renders
-        // without panel.config — it derives everything from hass.
-        const el = document.createElement("ha-insights-panel");
-        el.hass = wrap.hass;
-        el.narrow = wrap.narrow;
-        el.panel = wrap.panel;
-        wrap.appendChild(el);
+        // Wrapper is empty. Schedule a deferred re-check rather than
+        // force-mounting immediately. Idempotent: a pending timer absorbs
+        // additional observer hits for the same empty window.
+        if (pendingRecoveryTimer !== null)
+            return;
+        pendingRecoveryTimer = window.setTimeout(() => {
+            pendingRecoveryTimer = null;
+            if (!onRoute())
+                return;
+            const w = findWrapper();
+            if (!w)
+                return;
+            dedupePanels(w);
+            if (w.querySelector("ha-insights-panel"))
+                return; // HA succeeded
+            if (!customElements.get("ha-insights-panel"))
+                return;
+            const el = document.createElement("ha-insights-panel");
+            el.hass = w.hass;
+            el.narrow = w.narrow;
+            el.panel = w.panel;
+            w.appendChild(el);
+            state.forcedMounts += 1;
+            // Single console line so users sending diagnostics can see we
+            // recovered (and how often). Intentionally not behind a debug
+            // flag — forced-mount counts are useful evidence in future bug
+            // reports.
+            // eslint-disable-next-line no-console
+            console.info("[ha-insights] panel mount recovered (forced-mount #"
+                + `${state.forcedMounts}, attempts=${state.attempts})`);
+        }, MOUNT_GRACE_MS);
     };
-    // Initial try at module load (covers the "navigate-to-blank-panel"
-    // case where the wrapper is already empty).
-    tryRecover();
-    // Ongoing watch — fires when ha-panel-custom gets added or its children
-    // change. Scoped to body subtree, throttled implicitly by browser
-    // MutationObserver batching. Cheap.
-    const observer = new MutationObserver(() => tryRecover());
-    observer.observe(document.body, { childList: true, subtree: true });
+    // Watch the right shadow root — the one HA actually mutates when it
+    // inserts ha-panel-custom. The v1.2.26 observer on document.body
+    // could not see this mutation; cross-shadow-boundary observation
+    // is not supported by the MutationObserver spec.
+    let mainObserver = null;
+    const attachShadowObserver = () => {
+        if (mainObserver)
+            return;
+        const ha = document.querySelector("home-assistant");
+        const main = ha?.shadowRoot?.querySelector("home-assistant-main");
+        const shadow = main?.shadowRoot;
+        if (!shadow)
+            return;
+        mainObserver = new MutationObserver(() => tryRecover());
+        mainObserver.observe(shadow, { childList: true, subtree: true });
+    };
+    // The home-assistant-main shadow root may not exist at module load.
+    // Poll briefly until it does, then stop. (Bounded — gives up after
+    // 30s; production HA mounts main in <2s on any healthy install.)
+    const start = Date.now();
+    const shadowPoller = window.setInterval(() => {
+        if (mainObserver || Date.now() - start > 30_000) {
+            window.clearInterval(shadowPoller);
+            return;
+        }
+        attachShadowObserver();
+    }, 250);
+    // On URL change → one tryRecover. v1.3.5: tryRecover now self-gates
+    // with a 600ms grace timer, so we no longer need the 5s × 250ms
+    // polling burst. A single call schedules the deferred check; if HA's
+    // normal mount succeeds in the grace window, the deferred check
+    // no-ops. The mainObserver covers the case where HA mounts the
+    // wrapper after this nav event but before our deferred check fires.
+    const burstOnNav = () => {
+        if (!onRoute())
+            return;
+        tryRecover();
+    };
+    // Wrap history.pushState so we hear about programmatic navigation
+    // (HA uses Vaadin Router which calls pushState; vanilla popstate
+    // alone misses these).
+    const origPush = window.history.pushState.bind(window.history);
+    window.history.pushState = function (...args) {
+        const result = origPush(...args);
+        window.dispatchEvent(new Event("ha-insights:navigated"));
+        return result;
+    };
+    window.addEventListener("ha-insights:navigated", burstOnNav);
+    window.addEventListener("popstate", burstOnNav);
+    window.addEventListener("hashchange", burstOnNav);
+    // v1.3.3: skip the immediate-at-module-load tryRecover() (v1.3.1
+    // ran one synchronously, which raced HA's normal mount on the very
+    // first /ha-insights visit and produced two stacked panels). The
+    // burst starts immediately but its first probe is delayed 500ms,
+    // giving HA the chance to mount normally. If HA succeeds, the
+    // dedupe + early-return guard skip our mount entirely. If HA
+    // fails, recovery kicks in after the delay.
+    burstOnNav();
 })();
 
 export { HaInsightsPanel };

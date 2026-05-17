@@ -1618,6 +1618,16 @@ class HaInsightsCard extends i {
       font-size: 0.95em;
       color: var(--secondary-text-color);
     }
+    .coupling-badge {
+      cursor: help;
+      background: var(--info-color, #4a90e2);
+      color: var(--text-primary-color, #fff);
+      border-color: var(--info-color, #4a90e2);
+      opacity: 0.85;
+    }
+    .coupling-badge:hover {
+      opacity: 1.0;
+    }
     .pill-action:hover {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.06));
     }
@@ -4409,6 +4419,7 @@ class HaInsightsCard extends i {
       <div class="row" @click=${() => this._openDialog(insight.id)}>
         <div class="row-title">
           ${this._displayTitle(insight)}
+          ${this._renderCouplingBadge(insight)}
           ${hasCohort
             ? b ` <button
                 class="pill-action"
@@ -4709,6 +4720,41 @@ class HaInsightsCard extends i {
         if (insight.conflicts_with.length === 0)
             return insight.title;
         return insight.title.replace(/\s*(?:Automate\s+(?:this|it)\??|Build\s+automation\??)\s*$/i, "").trim();
+    }
+    /** v1.7: 🔗 badge for tight-coupled pairs.
+     *
+     *  Cooccurrence / lagged / button-press detectors stamp a `_coupling`
+     *  block on the payload when the leader→follower lag looks like
+     *  device-internal logic (ESPHome on_press, Z-Wave central scene,
+     *  Zigbee binding) rather than a real user habit. We render the
+     *  badge only for TIGHT tier — LOOSE is too ambiguous to surface,
+     *  NONE is the normal case.
+     *
+     *  The integration also demotes confidence on TIGHT pairs so they
+     *  rank below uncoupled suggestions; the badge tells the user
+     *  WHY the insight is muted rather than hidden.
+     */
+    _renderCouplingBadge(insight) {
+        const payload = insight.payload ?? {};
+        const coupling = payload._coupling;
+        if (!coupling || coupling.tier !== "TIGHT")
+            return A;
+        const lag = typeof coupling.median_lag_ms === "number"
+            ? `${Math.round(coupling.median_lag_ms)}ms`
+            : "<unknown>";
+        const cons = typeof coupling.consistency === "number"
+            ? `${Math.round(coupling.consistency * 100)}%`
+            : "<unknown>";
+        const tooltip = (`These entities change together within ~${lag} `
+            + `(${cons} consistency) — looks like a device binding or a `
+            + "pre-existing automation, not a new pattern to automate.");
+        return b `<span
+      class="pill-action coupling-badge"
+      style="margin-left:6px;"
+      role="img"
+      aria-label="${tooltip}"
+      title="${tooltip}"
+    >🔗 coupled</span>`;
     }
     /** Render an "🔁 already automated" or "🤖 in N automations" pill.
      *
@@ -5898,7 +5944,10 @@ class HaInsightsCard extends i {
       <div class="dialog-backdrop" @click=${this._closeDialog}>
         <div class="dialog" @click=${(e) => e.stopPropagation()}>
           <div class="dialog-header">
-            <div class="dialog-title">${this._displayTitle(insight)}</div>
+            <div class="dialog-title">
+              ${this._displayTitle(insight)}
+              ${this._renderCouplingBadge(insight)}
+            </div>
             <button
               class="dialog-close"
               aria-label="Close"
