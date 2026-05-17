@@ -1,5 +1,58 @@
 # Changelog
 
+## [1.7.0] — 2026-05-17
+
+### Added
+
+- **🔗 Dedup pill in bulk-area-assign rows.** Renders HA Insights
+  v1.10.3+'s `same_as` data: when another HA entity looks like
+  the SAME physical device (shared MAC, Bluetooth address, Zigbee
+  IEEE, IP/host, identifier overlap, or matching
+  manufacturer+model+via_device), a small `🔗 <other-entity>`
+  pill appears next to the row.
+
+  Common scenarios this catches:
+  - Tuya plug paired via Tuya cloud AND via BLE scanner
+  - Govee Cloud + Govee BLE
+  - Hue Bridge + Matter bridging the same Hue light
+  - Shelly Cloud + local API
+  - Zigbee2MQTT + ZHA pointed at the same device (migration state)
+
+  When you see the pill, the area you assign to THIS entity
+  should probably mirror to the linked one (and vice versa) —
+  they're showing different views of the same physical thing.
+
+  Thresholded at confidence ≥ 0.7 so the pill only appears when
+  the signal is strong enough to trust. Tooltip carries the
+  matching signal name + confidence so power users can verify
+  the integration's call.
+
+  Visually subtle (no border accent, no fill) so it doesn't
+  compete with the 🆔/❓/🏷️ name-quality badges or the 🔆
+  identify button — this is a HINT, not a primary action.
+
+### Requires
+
+HA Insights integration **v1.10.3+**. Falls back gracefully on
+older / vanilla HA: pill simply doesn't render (same opportunistic
+fetch as v1.5.0's smart sort and v1.6.0's identify button).
+
+### Closes the v1.10 Find-My-Device loop in the bulk dialog
+
+The bulk-area-assign dialog now displays four overlapping signals
+per entity:
+- **Sorted** worst-name-first (v1.5.0)
+- **Tier badge** explaining the name-quality call (v1.5.0)
+- **🔆 Identify button** to make the device physically announce
+  itself (v1.6.0)
+- **🔗 Dedup pill** linking entities that are likely the same
+  physical device (v1.7.0)
+
+Together: open the dialog → BLE-MAC mystery entities at the top
+with 🆔, you click 🔆 to find them, and if it's actually a
+duplicate of "Tuya Kitchen Plug" the 🔗 tells you up front so
+you don't assign area twice.
+
 ## [1.6.0] — 2026-05-17
 
 ### Added
