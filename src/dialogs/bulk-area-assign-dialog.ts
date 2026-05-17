@@ -145,6 +145,65 @@ export class BulkAreaAssignDialog extends LitElement {
     string,
     Array<{ entity_id: string; reason: string; confidence: number }>
   >();
+  /** v1.8.0 — Touch-test (perturbation) modal state.
+   *
+   *  Phase B of Find-My-Device: when the user can't fire 🔆 because
+   *  the entity is a passive sensor, they click 👆 instead. Modal
+   *  opens with per-device_class instruction ("place a finger on it
+   *  for 10s"), user clicks Start, server captures baseline + opens
+   *  N-second listening window, returns ranked z-scores. Modal
+   *  shows the result — including the killer **elimination**
+   *  message when the entity that spiked isn't the one the user
+   *  clicked. */
+  @state() private _touchTestOpen = false;
+  @state() private _touchTestEntity = "";
+  @state() private _touchTestDeviceClass = "";
+  @state() private _touchTestGuide:
+    | {
+        instruction: string;
+        expected_delta: number;
+        listening_window_s: number;
+        perturb_duration_s: number;
+      }
+    | null = null;
+  @state() private _touchTestPhase:
+    | "loading_guide"
+    | "ready"
+    | "running"
+    | "done"
+    | "error" = "loading_guide";
+  @state() private _touchTestResult: {
+    decision: "clear" | "ambiguous" | "no_signal";
+    top_match: string | null;
+    runner_up_gap: number | null;
+    reason: string;
+    candidates: Array<{
+      entity_id: string;
+      peak_delta: number;
+      z_score: number;
+      spike_detected: boolean;
+    }>;
+  } | null = null;
+  @state() private _touchTestCountdown = 0;
+  @state() private _touchTestError = "";
+  @state() private _touchTestCandidateCount = 0;
+
+  /** Browser-side countdown timer ID, so we can cancel on close. */
+  private _touchTestTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Hardcoded mirror of lib/perturbation_capability.py's _GUIDES keys.
+   *  Card needs to know which entities should show the 👆 button
+   *  WITHOUT round-tripping to the server for every row. Keep in
+   *  sync with the lib — see `supported_device_classes()` there. */
+  private static readonly _PERTURBABLE_DEVICE_CLASSES: ReadonlySet<string> =
+    new Set([
+      "temperature",
+      "humidity",
+      "carbon_dioxide",
+      "illuminance",
+      "sound_pressure",
+      "moisture",
+    ]);
   /** v1.2.7 — Structured filters in addition to free-text search.
    *  Empty string = "all". Populated from the actual data on fetch
    *  so users only see options they have. */
@@ -543,6 +602,386 @@ export class BulkAreaAssignDialog extends LitElement {
     const dot = entity_id.indexOf(".");
     return dot > 0 ? entity_id.slice(dot + 1) : entity_id;
   }
+
+  // ===== v1.8.0 — touch-test (perturbation) =====
+
+  /** Look up an entity's device_class from its live state attributes.
+   *  Returns "" when no state or no device_class attribute. */
+  private _deviceClassOf(entity_id: string): string {
+    const state = this.hass?.states?.[entity_id];
+    if (!state) return "";
+    const dc = state.attributes?.device_class;
+    return typeof dc === "string" ? dc.toLowerCase() : "";
+  }
+
+  /** Render the 👆 touch-test button next to the entity name.
+   *
+   *  Only renders when:
+   *    - the entity has a device_class in the perturbable set
+   *    - AND the entity is NOT identify-supported (otherwise 🔆 is
+   *      the better affordance — no need for an alternative)
+   *
+   *  This is the v1.10 Phase B affordance: passive sensors that
+   *  can't self-announce get user-driven perturbation testing
+   *  instead, with the killer elimination outcome.
+   */
+  private _renderTouchTestButton(entity_id: string): unknown {
+    const dc = this._deviceClassOf(entity_id);
+    if (!BulkAreaAssignDialog._PERTURBABLE_DEVICE_CLASSES.has(dc)) {
+      return nothing;
+    }
+    const cap = this._identifyCaps.get(entity_id);
+    if (cap?.supported) {
+      // Identify is a stronger signal — skip the touch-test button.
+      return nothing;
+    }
+    return html`<button
+      class="touch-test-btn"
+      aria-label="Touch test: physically perturb the sensor and see which entity spikes"
+      title="Touch test: physically perturb the sensor and see which entity spikes"
+      @click=${(e: Event) => {
+        e.stopPropagation();
+        void this._openTouchTest(entity_id, dc);
+      }}
+    >
+      👆
+    </button>`;
+  }
+
+  /** Open the touch-test modal for the clicked entity. Fetches the
+   *  per-device_class guide so we can show the instruction + window
+   *  before the user commits to Start. */
+  private async _openTouchTest(
+    entity_id: string,
+    device_class: string,
+  ): Promise<void> {
+    if (!this.hass) return;
+    this._touchTestEntity = entity_id;
+    this._touchTestDeviceClass = device_class;
+    this._touchTestGuide = null;
+    this._touchTestResult = null;
+    this._touchTestError = "";
+    this._touchTestPhase = "loading_guide";
+    this._touchTestCandidateCount = this._collectCandidates(device_class).length;
+    this._touchTestOpen = true;
+    try {
+      const resp = await this.hass.connection.sendMessagePromise<{
+        supported: boolean;
+        instruction?: string;
+        expected_delta?: number;
+        listening_window_s?: number;
+        perturb_duration_s?: number;
+        reason?: string;
+      }>({
+        type: "home_insights/perturbation_guide",
+        device_class,
+      });
+      if (!resp.supported) {
+        this._touchTestPhase = "error";
+        this._touchTestError =
+          resp.reason ?? `device_class '${device_class}' isn't perturbable.`;
+        return;
+      }
+      this._touchTestGuide = {
+        instruction: resp.instruction ?? "",
+        expected_delta: resp.expected_delta ?? 0,
+        listening_window_s: resp.listening_window_s ?? 30,
+        perturb_duration_s: resp.perturb_duration_s ?? 10,
+      };
+      this._touchTestPhase = "ready";
+    } catch (err) {
+      this._touchTestPhase = "error";
+      this._touchTestError = this._errMsg(err);
+    }
+  }
+
+  /** Collect all entities with the given device_class to use as
+   *  candidates for the perturbation test. We test ALL of them so
+   *  the elimination logic can fire — touching what the user
+   *  thinks is X but a different entity spikes is THE moment. */
+  private _collectCandidates(device_class: string): string[] {
+    const out: string[] = [];
+    for (const e of this._entities) {
+      if (this._deviceClassOf(e.entity_id) === device_class) {
+        out.push(e.entity_id);
+      }
+    }
+    return out;
+  }
+
+  /** Fire the test. Starts a clientside countdown for UX and the
+   *  WS request in parallel; they should complete at roughly the
+   *  same time (server sleeps for window_s seconds). */
+  private async _fireTouchTest(): Promise<void> {
+    if (!this.hass || !this._touchTestGuide) return;
+    const candidates = this._collectCandidates(this._touchTestDeviceClass);
+    if (candidates.length === 0) {
+      this._touchTestPhase = "error";
+      this._touchTestError = `No candidates with device_class '${this._touchTestDeviceClass}'.`;
+      return;
+    }
+    const window_s = this._touchTestGuide.listening_window_s;
+    this._touchTestPhase = "running";
+    this._touchTestCountdown = window_s;
+    this._touchTestTimer = setInterval(() => {
+      this._touchTestCountdown = Math.max(0, this._touchTestCountdown - 1);
+      if (this._touchTestCountdown === 0 && this._touchTestTimer != null) {
+        clearInterval(this._touchTestTimer);
+        this._touchTestTimer = null;
+      }
+    }, 1000);
+    try {
+      const resp = await this.hass.connection.sendMessagePromise<{
+        decision: "clear" | "ambiguous" | "no_signal";
+        top_match: string | null;
+        runner_up_gap: number | null;
+        reason: string;
+        candidates: Array<{
+          entity_id: string;
+          peak_delta: number;
+          z_score: number;
+          spike_detected: boolean;
+        }>;
+      }>({
+        type: "home_insights/perturbation_test",
+        device_class: this._touchTestDeviceClass,
+        candidate_entity_ids: candidates,
+        listening_window_s: window_s,
+      });
+      this._touchTestResult = resp;
+      this._touchTestPhase = "done";
+    } catch (err) {
+      this._touchTestPhase = "error";
+      this._touchTestError = this._errMsg(err);
+    } finally {
+      if (this._touchTestTimer != null) {
+        clearInterval(this._touchTestTimer);
+        this._touchTestTimer = null;
+      }
+    }
+  }
+
+  /** Close the modal + cancel any in-flight timer. */
+  private _closeTouchTest(): void {
+    if (this._touchTestTimer != null) {
+      clearInterval(this._touchTestTimer);
+      this._touchTestTimer = null;
+    }
+    this._touchTestOpen = false;
+    this._touchTestResult = null;
+    this._touchTestGuide = null;
+    this._touchTestError = "";
+  }
+
+  /** Reset to "ready" so the user can run the test again without
+   *  closing + reopening. Keeps the loaded guide. */
+  private _retryTouchTest(): void {
+    this._touchTestResult = null;
+    this._touchTestError = "";
+    if (this._touchTestTimer != null) {
+      clearInterval(this._touchTestTimer);
+      this._touchTestTimer = null;
+    }
+    this._touchTestPhase = "ready";
+  }
+
+  /** Render the touch-test modal. Phase-driven; renders only when
+   *  `_touchTestOpen` is true. */
+  private _renderTouchTestModal(): unknown {
+    if (!this._touchTestOpen) return nothing;
+    return html`
+      <div
+        class="touch-test-backdrop"
+        @click=${this._closeTouchTest}
+      >
+        <div
+          class="touch-test-modal"
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="touch-test-header">
+            <span class="touch-test-title">
+              👆 Touch test: ${this._touchTestEntity}
+            </span>
+            <button
+              class="touch-test-close"
+              aria-label="Close"
+              @click=${this._closeTouchTest}
+            >
+              ×
+            </button>
+          </div>
+          <div class="touch-test-body">
+            ${this._renderTouchTestPhase()}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /** Per-phase body content. Switches on _touchTestPhase. */
+  private _renderTouchTestPhase(): unknown {
+    switch (this._touchTestPhase) {
+      case "loading_guide":
+        return html`<p>Loading instructions…</p>`;
+
+      case "error":
+        return html`
+          <p class="touch-test-error">
+            ⚠ ${this._touchTestError}
+          </p>
+          <div class="touch-test-actions">
+            <button @click=${this._closeTouchTest}>Close</button>
+          </div>
+        `;
+
+      case "ready": {
+        const guide = this._touchTestGuide!;
+        return html`
+          <p>${guide.instruction}</p>
+          <p class="touch-test-meta">
+            Listening window: <b>${guide.listening_window_s}s</b> ·
+            ${this._touchTestCandidateCount}
+            ${this._touchTestDeviceClass}
+            ${this._touchTestCandidateCount === 1 ? "sensor" : "sensors"}
+            will be monitored.
+          </p>
+          <div class="touch-test-actions">
+            <button class="primary" @click=${() => this._fireTouchTest()}>
+              Start touch test
+            </button>
+            <button @click=${this._closeTouchTest}>Cancel</button>
+          </div>
+        `;
+      }
+
+      case "running": {
+        const guide = this._touchTestGuide!;
+        const elapsed = guide.listening_window_s - this._touchTestCountdown;
+        const pct = Math.min(
+          100,
+          Math.round((elapsed / guide.listening_window_s) * 100),
+        );
+        return html`
+          <p class="touch-test-prompt">
+            🟢 <b>Touch the sensor now!</b>
+          </p>
+          <div class="touch-test-progress">
+            <div
+              class="touch-test-progress-fill"
+              style="width: ${pct}%;"
+            ></div>
+          </div>
+          <p class="touch-test-meta">
+            ${this._touchTestCountdown}s remaining ·
+            watching ${this._touchTestCandidateCount}
+            ${this._touchTestDeviceClass}
+            ${this._touchTestCandidateCount === 1 ? "sensor" : "sensors"}…
+          </p>
+        `;
+      }
+
+      case "done":
+        return this._renderTouchTestResult();
+    }
+    return nothing;
+  }
+
+  /** Render the final result, with phase-aware copy for the
+   *  elimination case (top_match != clicked entity). */
+  private _renderTouchTestResult(): unknown {
+    const result = this._touchTestResult;
+    if (!result) return nothing;
+    const clicked = this._touchTestEntity;
+
+    if (result.decision === "no_signal") {
+      return html`
+        <p class="touch-test-no-signal">
+          ❌ No clear spike detected.
+        </p>
+        <p class="touch-test-meta">${result.reason}</p>
+        <div class="touch-test-actions">
+          <button class="primary" @click=${() => this._retryTouchTest()}>
+            Try again
+          </button>
+          <button @click=${this._closeTouchTest}>Close</button>
+        </div>
+      `;
+    }
+
+    if (result.decision === "ambiguous") {
+      const spiked = result.candidates.filter((c) => c.spike_detected);
+      return html`
+        <p class="touch-test-ambiguous">
+          ⚠ Multiple candidates spiked together.
+        </p>
+        <ul class="touch-test-candidate-list">
+          ${spiked.map(
+            (c) => html`
+              <li>
+                <b>${c.entity_id}</b>
+                — z=${c.z_score.toFixed(1)},
+                Δ=${c.peak_delta.toFixed(2)}
+              </li>
+            `,
+          )}
+        </ul>
+        <p class="touch-test-meta">${result.reason}</p>
+        <div class="touch-test-actions">
+          <button class="primary" @click=${() => this._retryTouchTest()}>
+            Try again
+          </button>
+          <button @click=${this._closeTouchTest}>Close</button>
+        </div>
+      `;
+    }
+
+    // decision === "clear"
+    const top = result.candidates[0];
+    if (result.top_match !== clicked) {
+      // THE elimination moment.
+      return html`
+        <p class="touch-test-elimination">
+          ⚠ Mislabel detected!
+        </p>
+        <p class="touch-test-elim-detail">
+          You touched what was labelled <b>${clicked}</b>, but
+          <b>${result.top_match}</b> actually spiked
+          (z=${top.z_score.toFixed(1)},
+          Δ=${top.peak_delta.toFixed(2)}).
+        </p>
+        <p class="touch-test-meta">
+          These two entities are probably mislabeled — the physical
+          sensor you touched is reported as
+          <b>${result.top_match}</b>, not ${clicked}. Check the
+          device names in HA and rename accordingly.
+        </p>
+        <div class="touch-test-actions">
+          <button class="primary" @click=${() => this._retryTouchTest()}>
+            Try again
+          </button>
+          <button @click=${this._closeTouchTest}>Close</button>
+        </div>
+      `;
+    }
+
+    // Clear match AND the user clicked the right entity.
+    return html`
+      <p class="touch-test-success">
+        ✓ Clear match: <b>${result.top_match}</b>
+      </p>
+      <p class="touch-test-meta">
+        Spiked Δ=${top.peak_delta.toFixed(2)}
+        ${this._touchTestDeviceClass === "temperature" ? "°C" : ""}
+        (z=${top.z_score.toFixed(1)}). ${result.reason}
+      </p>
+      <div class="touch-test-actions">
+        <button class="primary" @click=${() => this._retryTouchTest()}>
+          Run again
+        </button>
+        <button @click=${this._closeTouchTest}>Close</button>
+      </div>
+    `;
+  }
   private _areaNameById(area_id: string | null | undefined): string {
     if (!area_id) return "";
     return this._areas.find((a) => a.area_id === area_id)?.name ?? area_id;
@@ -862,6 +1301,7 @@ export class BulkAreaAssignDialog extends LitElement {
                   <div>
                     ${this._renderNameQualityBadge(nq)}${this._entityLabel(e)}
                     ${this._renderIdentifyButton(e.entity_id)}
+                    ${this._renderTouchTestButton(e.entity_id)}
                     ${this._renderDedupPill(e.entity_id)}
                   </div>
                   <div class="meta">${e.entity_id}</div>
@@ -1045,6 +1485,7 @@ export class BulkAreaAssignDialog extends LitElement {
           </div>
         </div>
       </div>
+      ${this._renderTouchTestModal()}
     `;
   }
 
@@ -1272,6 +1713,136 @@ export class BulkAreaAssignDialog extends LitElement {
       font-size: 0.85em;
       vertical-align: middle;
       cursor: help;
+    }
+    /* v1.8.0 — touch-test (perturbation) button + modal. */
+    .touch-test-btn {
+      margin-left: 8px;
+      padding: 1px 6px;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-radius: 4px;
+      background: var(--card-background-color, transparent);
+      cursor: pointer;
+      font-size: 0.9em;
+      line-height: 1.4;
+      vertical-align: middle;
+    }
+    .touch-test-btn:hover {
+      background: var(--accent-color, #ff9800);
+      color: var(--text-primary-color, white);
+      border-color: var(--accent-color, #ff9800);
+    }
+    .touch-test-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .touch-test-modal {
+      background: var(--card-background-color, white);
+      color: var(--primary-text-color);
+      border-radius: 8px;
+      min-width: 420px;
+      max-width: 520px;
+      padding: 0;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    }
+    .touch-test-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--divider-color, #e0e0e0);
+    }
+    .touch-test-title {
+      font-weight: 600;
+    }
+    .touch-test-close {
+      background: transparent;
+      border: none;
+      font-size: 1.4em;
+      cursor: pointer;
+      color: var(--secondary-text-color);
+      line-height: 1;
+    }
+    .touch-test-body {
+      padding: 18px;
+    }
+    .touch-test-body p {
+      margin: 8px 0;
+      line-height: 1.5;
+    }
+    .touch-test-meta {
+      color: var(--secondary-text-color);
+      font-size: 0.9em;
+    }
+    .touch-test-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 16px;
+    }
+    .touch-test-actions button {
+      padding: 6px 14px;
+      border-radius: 4px;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      background: var(--card-background-color, white);
+      color: var(--primary-text-color);
+      cursor: pointer;
+    }
+    .touch-test-actions button.primary {
+      background: var(--primary-color, #03a9f4);
+      color: var(--text-primary-color, white);
+      border-color: var(--primary-color, #03a9f4);
+    }
+    .touch-test-prompt {
+      font-size: 1.1em;
+      text-align: center;
+    }
+    .touch-test-progress {
+      height: 8px;
+      background: var(--secondary-background-color, #f5f5f5);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 12px 0;
+    }
+    .touch-test-progress-fill {
+      height: 100%;
+      background: var(--primary-color, #03a9f4);
+      transition: width 1s linear;
+    }
+    .touch-test-error {
+      color: var(--error-color, #f44336);
+    }
+    .touch-test-success {
+      color: var(--success-color, #4caf50);
+      font-size: 1.1em;
+    }
+    .touch-test-no-signal {
+      font-size: 1.05em;
+    }
+    .touch-test-ambiguous {
+      color: var(--warning-color, #ff9800);
+      font-size: 1.05em;
+    }
+    .touch-test-elimination {
+      color: var(--warning-color, #ff9800);
+      font-size: 1.2em;
+      font-weight: 600;
+    }
+    .touch-test-elim-detail {
+      font-size: 1.05em;
+    }
+    .touch-test-candidate-list {
+      list-style: none;
+      padding: 0;
+      margin: 8px 0;
+    }
+    .touch-test-candidate-list li {
+      padding: 4px 0;
+      border-bottom: 1px solid var(--divider-color, #e0e0e0);
     }
     .area-picker {
       width: 100%;

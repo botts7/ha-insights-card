@@ -1,5 +1,70 @@
 # Changelog
 
+## [1.8.0] — 2026-05-17
+
+### Added — 👆 touch-test for passive sensors (Phase B)
+
+The killer feature of v1.10 Find-My-Device. Passive sensors (temp,
+humidity, illuminance, CO₂, sound, moisture) can't self-announce
+like lights / speakers — so the user **physically perturbs** them
+and HA Insights tells them which entity actually spiked.
+
+**The elimination outcome**: when the user touches what they think
+is `sensor.foo` but `sensor.bar` actually spikes, the modal
+displays:
+
+> **⚠ Mislabel detected!**
+> You touched what was labelled `sensor.foo`, but `sensor.bar`
+> actually spiked (z=4.2, Δ=+2.8). These two entities are
+> probably mislabeled — check the device names in HA and rename
+> accordingly.
+
+Mislabeling is endemic in HA installs. This is the moment that
+justifies the whole feature.
+
+### How it works
+
+1. **👆 button** appears next to rows where the entity's
+   `device_class` is in the perturbable set (temperature / humidity
+   / carbon_dioxide / illuminance / sound_pressure / moisture)
+   AND identify-via-Phase-A isn't supported.
+2. **Click → modal opens** with the per-device_class instruction
+   ("Place a finger on the sensor for 10–15 seconds"), expected
+   listening window, and candidate count ("5 temperature sensors
+   will be monitored").
+3. **Click Start → countdown begins.** Visible progress bar +
+   "Touch the sensor now!" prompt. Server captures baseline from
+   the HA Insights event buffer, then opens the listening window.
+4. **Window closes → ranked result displays**:
+   - **Clear match** (top z > 3, gap > 1.5): "✓ Clear match:
+     sensor.kitchen_temp" with peak delta + z-score
+   - **Elimination** (top_match ≠ clicked entity): the mislabel
+     banner above — orange warning, full explanation
+   - **Ambiguous** (multiple candidates above threshold): lists
+     all spiked entities with z-scores; suggests checking the 🔗
+     dedup pill in case it's a multi-function device
+   - **No signal**: "❌ No clear spike detected" + retry button
+     + suggestions for stronger perturbation
+5. **Run again / Close** — modal stays open for retries.
+
+### Requires
+
+HA Insights integration **v1.10.5+**. Falls back gracefully on
+older / vanilla HA: the 👆 button just doesn't appear (same
+opportunistic-fetch pattern as the rest of the Find-My-Device UI).
+
+### Closes Find-My-Device Phase B
+
+Combined with Phase A (v1.6.0 🔆 button) and the v1.5.0 sort + v1.7.0
+🔗 dedup pill, every entity in the bulk-area-assign dialog now has
+exactly one path to identification:
+
+- Identify-capable (lights, speakers, sirens, switches) → 🔆
+- Perturbable passive sensor → 👆
+- Already-named (Tuya/Hue/HomeKit) → no button needed
+- Truly unidentifiable (PM2.5, battery, pressure) → v1.11
+  statistical correlation (future)
+
 ## [1.7.0] — 2026-05-17
 
 ### Added
