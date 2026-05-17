@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.9.0] — 2026-05-17
+
+### Changed
+
+- **Authority for "is this entity perturbable?" moved server-side.**
+  Card previously kept a hardcoded set of perturbable
+  `device_class`es that mirrored
+  `lib/perturbation_capability.py::_GUIDES`. With integration
+  v1.10.7+ the `identify_capability` response now includes
+  `perturbable: bool` per entity, and the card consumes that
+  authoritatively. The hardcoded set survives as a fallback for
+  card-with-older-integration combos; drift there only affects
+  pre-v1.10.7 installs and won't see new device_class additions.
+  Single source of truth: the Python lib.
+
+- **Touch-test result reads `unit_of_measurement` from
+  `hass.states[eid]`** instead of hardcoding °C. The result line
+  now shows `Δ=+2.80 °F` / `Δ=+10.00 %` / `Δ=+500.00 ppm` etc.
+  Reactive — if the user reconfigures the unit, the next render
+  picks it up.
+
+### Fixed
+
+- **Touch-test modal z-index bug** — parent `.backdrop` is
+  z-index 9999; touch-test backdrop was 1000, causing the modal
+  to render BEHIND the parent and be unclickable. Bumped to
+  10000. Caught during v1.10.7 polish pass; would have manifested
+  on first real-install use.
+
+### Requires
+
+HA Insights integration **v1.10.7+** for the server-side
+authority + new fields. Older integrations get the hardcoded-set
+fallback automatically.
+
 ## [1.8.0] — 2026-05-17
 
 ### Added — 👆 touch-test for passive sensors (Phase B)
