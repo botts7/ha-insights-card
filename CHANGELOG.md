@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.3.4] — 2026-05-17
+
+### Fixed
+
+- **Side panel never showed the 🔗 coupling badge** (or any other
+  v1.3.0+ card changes). Root cause: when both the HACS-installed
+  `ha-insights-card.js` AND the integration-bundled `panel.js` (which
+  also contains the card source via `import "./ha-insights-card"`)
+  loaded, whichever ran `customElements.define("ha-insights-card", …)`
+  first won. If HACS card was older than the integration's bundled
+  card, the panel embedded the stale HACS-loaded class — missing the
+  badge code from v1.3.0+.
+
+  Real-install diagnostic on 2026-05-17 confirmed: card state had
+  `_coupling.tier === "TIGHT"` correctly stamped, the `_renderRow`
+  method WAS called, `_renderCouplingBadge` invocation WAS present in
+  the bundle — but 0 `.coupling-badge` elements rendered. Stale-class
+  registration was eating the new render code.
+
+  v1.3.4 registers a separate `ha-insights-card-bundled` element name
+  in the panel bundle (trivial subclass of the freshly-built
+  `HaInsightsCard`). The panel embeds `<ha-insights-card-bundled>`
+  instead of `<ha-insights-card>` — guaranteed to use the bundle's
+  own class, regardless of what HACS has done with the dashboard
+  card. The dashboard `<ha-insights-card>` element keeps working
+  exactly as before.
+
 ## [1.3.3] — 2026-05-17
 
 ### Fixed
