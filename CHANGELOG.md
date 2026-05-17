@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.3.3] — 2026-05-17
+
+### Fixed
+
+- **Panel rendering twice on first navigation** — v1.3.1's recovery
+  IIFE called `tryRecover()` synchronously at module load AND started
+  a polling burst immediately. On first `/ha-insights` visit, our
+  force-mount ran before HA's normal panel resolver finished, so HA
+  then mounted a second `ha-insights-panel` on top of ours. The
+  `wrap.querySelector("ha-insights-panel")` guard caught subsequent
+  attempts but not the initial race. Result: two complete panels
+  stacked in the wrapper.
+
+  v1.3.3 fixes both sides of the race:
+  1. **Dedupe pass** at the start of every `tryRecover()`. If
+     multiple `ha-insights-panel` children exist, all but the first
+     are removed. Idempotent.
+  2. **500ms first-probe delay** in the burst. HA's normal resolver
+     finishes well within that window on healthy installs; we only
+     force-mount after that grace period.
+  3. **No more module-load `tryRecover()`** — that synchronous call
+     was the worst offender. The burst-with-delay covers both the
+     "navigate to /ha-insights" and "fresh page load" cases without
+     racing.
+  4. Logs `[ha-insights] removed N duplicate panel element(s)` when
+     dedupe fires, so users on stuck-double-panel can see the fix
+     working.
+
 ## [1.3.2] — 2026-05-17
 
 ### Fixed
