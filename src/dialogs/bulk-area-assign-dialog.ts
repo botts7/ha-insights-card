@@ -201,6 +201,40 @@ export class BulkAreaAssignDialog extends LitElement {
   /** Browser-side countdown timer ID, so we can cancel on close. */
   private _touchTestTimer: ReturnType<typeof setInterval> | null = null;
 
+  // v1.10.0 — BLE live-find state.
+  /** Map of entity_id → BLE capability from the v1.12.0 backend.
+   *  Populated alongside _identifyCaps / _dedupHints in the single
+   *  WS round-trip on dialog open. */
+  @state() private _bleCaps = new Map<
+    string,
+    {
+      is_trackable: boolean;
+      bluetooth_address: string | null;
+      seen_by_proxies: string[];
+      reason: string;
+    }
+  >();
+  @state() private _bleFindOpen = false;
+  @state() private _bleFindEntity = "";
+  @state() private _bleFindAddress = "";
+  @state() private _bleFindLatest: {
+    rssi_raw: number;
+    rssi_smoothed: number;
+    scanner: string;
+    received_at: number;
+  } | null = null;
+  /** Per-scanner latest reading for the multi-proxy view. */
+  @state() private _blePerScanner = new Map<
+    string,
+    { rssi_smoothed: number; received_at: number }
+  >();
+  /** Recent smoothed readings for trend arrow. Cap at 8 entries
+   *  (~8 seconds of context at 1Hz advertisement rate). */
+  @state() private _bleTrendBuffer: number[] = [];
+  @state() private _bleFindError = "";
+  /** Returned by `subscribeMessage` — call it to unsubscribe. */
+  private _bleFindUnsub: (() => void) | null = null;
+
   /** Fallback set used when the integration is older than v1.10.7
    *  and doesn't include `perturbable` in the identify_capability
    *  response. Keep loosely in sync with
@@ -358,6 +392,10 @@ export class BulkAreaAssignDialog extends LitElement {
       this._nameQuality = nextNq;
       this._identifyCaps = nextCaps;
       this._dedupHints = nextDedup;
+      // v1.10.0 — fire-and-forget BLE capability fetch in parallel.
+      // Done as a separate call (different WS endpoint) so failure
+      // doesn't poison the identify_capability result above.
+      void this._fetchBleCapability(candidates);
     } catch {
       // HA Insights not installed, or older version without the
       // endpoint, or a transient error. Sorting falls back to
@@ -669,14 +707,14 @@ export class BulkAreaAssignDialog extends LitElement {
     if (!dc) return nothing;
     return html`<button
       class="touch-test-btn"
-      aria-label="Touch test: physically perturb the sensor and see which entity spikes"
-      title="Touch test: physically perturb the sensor and see which entity spikes"
+      aria-label="BETA: touch test — physically perturb the sensor and see which entity spikes"
+      title="BETA: Touch test. Physically perturb the sensor and HA Insights identifies which entity actually spiked. Thresholds still being calibrated."
       @click=${(e: Event) => {
         e.stopPropagation();
         void this._openTouchTest(entity_id, dc);
       }}
     >
-      👆
+      👆 <span class="beta-badge">BETA</span>
     </button>`;
   }
 
@@ -815,6 +853,254 @@ export class BulkAreaAssignDialog extends LitElement {
       this._touchTestTimer = null;
     }
     this._touchTestPhase = "ready";
+  }
+
+  // ===== v1.10.0 — BLE live-find =====
+
+  /** Fetch BLE capability for the same entity batch the
+   *  identify_capability call covered. Requires HA Insights
+   *  v1.12.0+. Silent fallback when the endpoint is absent
+   *  (older integration / no bluetooth integration loaded). */
+  private async _fetchBleCapability(entity_ids: string[]): Promise<void> {
+    if (!this.hass || entity_ids.length === 0) return;
+    try {
+      const resp = await this.hass.connection.sendMessagePromise<{
+        capabilities: Record<
+          string,
+          {
+            is_trackable: boolean;
+            bluetooth_address: string | null;
+            seen_by_proxies: string[];
+            reason: string;
+          }
+        >;
+      }>({
+        type: "home_insights/ble_capability",
+        entity_ids,
+      });
+      const next = new Map<
+        string,
+        {
+          is_trackable: boolean;
+          bluetooth_address: string | null;
+          seen_by_proxies: string[];
+          reason: string;
+        }
+      >();
+      for (const [eid, cap] of Object.entries(resp.capabilities ?? {})) {
+        next.set(eid, cap);
+      }
+      this._bleCaps = next;
+    } catch {
+      // HA Insights pre-v1.12.0 — no BLE capability endpoint. No 📡
+      // buttons rendered; user proceeds with identify/touch-test as
+      // their only Find-My-Device options.
+    }
+  }
+
+  /** Render the 📡 button on rows where the entity is BLE-trackable.
+   *
+   *  EXPERIMENTAL — brand new in v1.12.0; depends on BLE proxies or
+   *  the HA companion app's BLE scanner being active. The button is
+   *  rendered with a visible "EXP" tag so users understand this is
+   *  not as mature as 🔆 or 👆. */
+  private _renderBleFindButton(entity_id: string): unknown {
+    const cap = this._bleCaps.get(entity_id);
+    if (!cap || !cap.is_trackable) return nothing;
+    return html`<button
+      class="ble-find-btn"
+      aria-label="${cap.reason} — Experimental: BLE live-find streams real-time RSSI"
+      title="EXPERIMENTAL — BLE live-find. ${cap.reason}"
+      @click=${(e: Event) => {
+        e.stopPropagation();
+        this._openBleFind(entity_id);
+      }}
+    >
+      📡 <span class="exp-badge">EXP</span>
+    </button>`;
+  }
+
+  /** Open the BLE-find modal and start the WS subscription. */
+  private _openBleFind(entity_id: string): void {
+    const cap = this._bleCaps.get(entity_id);
+    if (!cap || !cap.bluetooth_address || !this.hass) return;
+    this._bleFindEntity = entity_id;
+    this._bleFindAddress = cap.bluetooth_address;
+    this._bleFindLatest = null;
+    this._blePerScanner = new Map();
+    this._bleTrendBuffer = [];
+    this._bleFindError = "";
+    this._bleFindOpen = true;
+    void this._subscribeBleFind();
+  }
+
+  private async _subscribeBleFind(): Promise<void> {
+    if (!this.hass) return;
+    if (this._bleFindUnsub != null) {
+      this._bleFindUnsub();
+      this._bleFindUnsub = null;
+    }
+    try {
+      this._bleFindUnsub =
+        await this.hass.connection.subscribeMessage<{
+          rssi_raw: number;
+          rssi_smoothed: number;
+          scanner: string;
+        }>(
+          (event) => this._handleBleEvent(event),
+          {
+            type: "home_insights/ble_live_find",
+            bluetooth_address: this._bleFindAddress,
+          },
+        );
+    } catch (err) {
+      this._bleFindError = this._errMsg(err);
+    }
+  }
+
+  private _handleBleEvent(event: {
+    rssi_raw: number;
+    rssi_smoothed: number;
+    scanner: string;
+  }): void {
+    const now = Date.now();
+    this._bleFindLatest = { ...event, received_at: now };
+    const nextScanner = new Map(this._blePerScanner);
+    nextScanner.set(event.scanner, {
+      rssi_smoothed: event.rssi_smoothed,
+      received_at: now,
+    });
+    this._blePerScanner = nextScanner;
+    // Trend buffer: keep last 8 smoothed readings.
+    const nextTrend = [...this._bleTrendBuffer, event.rssi_smoothed];
+    if (nextTrend.length > 8) nextTrend.shift();
+    this._bleTrendBuffer = nextTrend;
+  }
+
+  private _closeBleFind(): void {
+    if (this._bleFindUnsub != null) {
+      this._bleFindUnsub();
+      this._bleFindUnsub = null;
+    }
+    this._bleFindOpen = false;
+    this._bleFindLatest = null;
+    this._blePerScanner = new Map();
+    this._bleTrendBuffer = [];
+    this._bleFindError = "";
+  }
+
+  /** Compute the trend arrow + label from the rolling smoothed RSSI
+   *  buffer. Comparing the latest 2 readings to the previous 3
+   *  smooths over the per-advertisement jitter the 3s EMA hasn't
+   *  killed yet. */
+  private _bleTrend(): { arrow: string; label: string } {
+    const buf = this._bleTrendBuffer;
+    if (buf.length < 4) return { arrow: "·", label: "settling" };
+    const recent = (buf[buf.length - 1] + buf[buf.length - 2]) / 2;
+    const earlier =
+      (buf[buf.length - 4] + buf[buf.length - 3]) / 2;
+    const delta = recent - earlier;
+    if (delta > 2) return { arrow: "↑", label: "getting closer" };
+    if (delta < -2) return { arrow: "↓", label: "getting further" };
+    return { arrow: "→", label: "stable" };
+  }
+
+  /** Bucket an RSSI value into a color/temperature label. */
+  private _rssiBucket(rssi: number): { label: string; cls: string } {
+    if (rssi >= -55) return { label: "HOT", cls: "rssi-hot" };
+    if (rssi >= -70) return { label: "warm", cls: "rssi-warm" };
+    if (rssi >= -85) return { label: "cool", cls: "rssi-cool" };
+    return { label: "cold", cls: "rssi-cold" };
+  }
+
+  /** Render the BLE live-find modal. */
+  private _renderBleFindModal(): unknown {
+    if (!this._bleFindOpen) return nothing;
+    const latest = this._bleFindLatest;
+    const trend = this._bleTrend();
+    const bucket = latest ? this._rssiBucket(latest.rssi_smoothed) : null;
+    const perScanner = Array.from(this._blePerScanner.entries())
+      .map(([scanner, data]) => ({ scanner, ...data }))
+      .sort((a, b) => b.rssi_smoothed - a.rssi_smoothed);
+
+    return html`
+      <div class="ble-find-backdrop" @click=${this._closeBleFind}>
+        <div
+          class="ble-find-modal"
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="ble-find-header">
+            <span class="ble-find-title">
+              📡 BLE Live-Find: ${this._bleFindEntity}
+              <span class="exp-pill">EXPERIMENTAL</span>
+            </span>
+            <button
+              class="ble-find-close"
+              aria-label="Close"
+              @click=${this._closeBleFind}
+            >
+              ×
+            </button>
+          </div>
+          <div class="ble-find-body">
+            <p class="ble-find-meta">
+              Address: <code>${this._bleFindAddress}</code>
+            </p>
+            ${this._bleFindError
+              ? html`<p class="ble-find-error">⚠ ${this._bleFindError}</p>`
+              : nothing}
+            ${latest
+              ? html`
+                  <div class="ble-find-reading ${bucket?.cls ?? ""}">
+                    <div class="ble-find-rssi">
+                      ${latest.rssi_smoothed} dBm
+                      <span class="ble-find-trend">${trend.arrow}</span>
+                    </div>
+                    <div class="ble-find-label">
+                      ${bucket?.label ?? ""} · ${trend.label}
+                    </div>
+                  </div>
+                `
+              : html`
+                  <p class="ble-find-waiting">
+                    Listening for advertisements… make sure the HA
+                    companion app's BLE scanner is enabled (Settings →
+                    Companion App → Bluetooth), or that an ESPHome
+                    BLE proxy is online and within range.
+                  </p>
+                `}
+            ${perScanner.length > 1
+              ? html`
+                  <div class="ble-find-proxy-table">
+                    <div class="ble-find-proxy-header">
+                      Per-proxy RSSI (multi-proxy triangulation):
+                    </div>
+                    ${perScanner.map(
+                      (p, i) => html`
+                        <div class="ble-find-proxy-row">
+                          <span class="ble-find-proxy-name">${p.scanner}</span>
+                          <span class="ble-find-proxy-rssi">
+                            ${p.rssi_smoothed.toFixed(1)} dBm
+                          </span>
+                          ${i === 0
+                            ? html`<span class="ble-find-proxy-tag">closest</span>`
+                            : nothing}
+                        </div>
+                      `,
+                    )}
+                  </div>
+                `
+              : nothing}
+            <p class="ble-find-help">
+              Walk toward where you think the device is. RSSI <b>rises</b>
+              (closer to 0 dBm) as you approach. Multipath / walls /
+              mirrors can cause sudden jumps — keep moving and trust the
+              trend over individual readings.
+            </p>
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   /** Render the touch-test modal. Phase-driven; renders only when
@@ -1345,6 +1631,7 @@ export class BulkAreaAssignDialog extends LitElement {
                     ${this._renderNameQualityBadge(nq)}${this._entityLabel(e)}
                     ${this._renderIdentifyButton(e.entity_id)}
                     ${this._renderTouchTestButton(e.entity_id)}
+                    ${this._renderBleFindButton(e.entity_id)}
                     ${this._renderDedupPill(e.entity_id)}
                   </div>
                   <div class="meta">${e.entity_id}</div>
@@ -1529,6 +1816,7 @@ export class BulkAreaAssignDialog extends LitElement {
         </div>
       </div>
       ${this._renderTouchTestModal()}
+      ${this._renderBleFindModal()}
     `;
   }
 
@@ -1888,6 +2176,200 @@ export class BulkAreaAssignDialog extends LitElement {
     .touch-test-candidate-list li {
       padding: 4px 0;
       border-bottom: 1px solid var(--divider-color, #e0e0e0);
+    }
+    /* v1.10.0 — BLE live-find button + modal + EXPERIMENTAL tags.
+     * Visual heavier on the experimental cue than 🔆 / 👆 because
+     * this is the newest and least field-tested affordance. */
+    .ble-find-btn {
+      margin-left: 8px;
+      padding: 1px 8px;
+      border: 1px solid var(--info-color, #2196f3);
+      border-radius: 4px;
+      background: var(--card-background-color, transparent);
+      cursor: pointer;
+      font-size: 0.9em;
+      line-height: 1.4;
+      vertical-align: middle;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .ble-find-btn:hover {
+      background: var(--info-color, #2196f3);
+      color: var(--text-primary-color, white);
+    }
+    /* Inline EXP badge — small, high-contrast, visible always.
+     * EXP (orange) = experimental, brand new, expect rough edges.
+     * BETA (blue)  = thresholds need real-install calibration.
+     * Both render the same shape so they cluster visually with
+     * other inline buttons, but the color difference signals the
+     * maturity gradient to users at a glance. */
+    .exp-badge {
+      display: inline-block;
+      font-size: 0.7em;
+      font-weight: 700;
+      padding: 0 4px;
+      border-radius: 3px;
+      background: var(--warning-color, #ff9800);
+      color: var(--text-primary-color, white);
+      vertical-align: middle;
+      letter-spacing: 0.5px;
+    }
+    .beta-badge {
+      display: inline-block;
+      font-size: 0.7em;
+      font-weight: 700;
+      padding: 0 4px;
+      border-radius: 3px;
+      background: var(--info-color, #2196f3);
+      color: var(--text-primary-color, white);
+      vertical-align: middle;
+      letter-spacing: 0.5px;
+    }
+    /* EXPERIMENTAL pill in the modal header — wider, more visible */
+    .exp-pill {
+      display: inline-block;
+      margin-left: 8px;
+      font-size: 0.7em;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: var(--warning-color, #ff9800);
+      color: var(--text-primary-color, white);
+      letter-spacing: 1px;
+      vertical-align: middle;
+    }
+    .ble-find-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    }
+    .ble-find-modal {
+      background: var(--card-background-color, white);
+      color: var(--primary-text-color);
+      border-radius: 8px;
+      min-width: 480px;
+      max-width: 600px;
+      padding: 0;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    }
+    .ble-find-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--divider-color, #e0e0e0);
+    }
+    .ble-find-title {
+      font-weight: 600;
+    }
+    .ble-find-close {
+      background: transparent;
+      border: none;
+      font-size: 1.4em;
+      cursor: pointer;
+      color: var(--secondary-text-color);
+      line-height: 1;
+    }
+    .ble-find-body {
+      padding: 18px;
+    }
+    .ble-find-meta {
+      color: var(--secondary-text-color);
+      font-size: 0.9em;
+    }
+    .ble-find-meta code {
+      background: var(--secondary-background-color, #f5f5f5);
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+    }
+    .ble-find-error {
+      color: var(--error-color, #f44336);
+    }
+    .ble-find-waiting {
+      color: var(--secondary-text-color);
+      font-style: italic;
+      padding: 12px 0;
+    }
+    .ble-find-reading {
+      text-align: center;
+      padding: 24px;
+      border-radius: 8px;
+      margin: 12px 0;
+      transition: background 0.3s ease;
+    }
+    .ble-find-rssi {
+      font-size: 2.4em;
+      font-weight: 700;
+      font-family: monospace;
+    }
+    .ble-find-trend {
+      margin-left: 12px;
+      font-size: 0.85em;
+    }
+    .ble-find-label {
+      font-size: 1em;
+      margin-top: 4px;
+      opacity: 0.85;
+    }
+    /* RSSI temperature buckets. Closer to 0 dBm = closer device. */
+    .rssi-hot {
+      background: rgba(76, 175, 80, 0.25);
+      color: var(--success-color, #2e7d32);
+    }
+    .rssi-warm {
+      background: rgba(255, 193, 7, 0.2);
+      color: #f57c00;
+    }
+    .rssi-cool {
+      background: rgba(255, 152, 0, 0.15);
+      color: #e65100;
+    }
+    .rssi-cold {
+      background: rgba(244, 67, 54, 0.15);
+      color: var(--error-color, #c62828);
+    }
+    .ble-find-proxy-table {
+      margin: 12px 0;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-radius: 4px;
+    }
+    .ble-find-proxy-header {
+      padding: 8px 12px;
+      background: var(--secondary-background-color, #f5f5f5);
+      font-weight: 600;
+      font-size: 0.9em;
+    }
+    .ble-find-proxy-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 12px;
+      border-top: 1px solid var(--divider-color, #e0e0e0);
+    }
+    .ble-find-proxy-name {
+      flex: 1;
+      font-family: monospace;
+    }
+    .ble-find-proxy-rssi {
+      font-family: monospace;
+    }
+    .ble-find-proxy-tag {
+      font-size: 0.75em;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: var(--success-color, #4caf50);
+      color: var(--text-primary-color, white);
+    }
+    .ble-find-help {
+      color: var(--secondary-text-color);
+      font-size: 0.9em;
+      margin-top: 12px;
     }
     .area-picker {
       width: 100%;

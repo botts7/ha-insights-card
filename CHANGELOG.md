@@ -1,5 +1,67 @@
 # Changelog
 
+## [1.10.0] — 2026-05-17
+
+### Added — 📡 BLE live-find + explicit maturity tags
+
+#### 📡 BLE live-find button + RSSI scope modal
+
+Third axis of the v1.10+ Find-My-Device feature, after 🔆 identify
+and 👆 touch-test. When an entity has a BLE address visible to HA's
+bluetooth integration AND at least one BLE proxy / scanner is
+observing it, a 📡 button appears next to its row.
+
+**Click opens a real-time RSSI scope modal:**
+
+- Large smoothed RSSI reading (EMA, ~3 s effective window from
+  the server-side smoothing in v1.12.0)
+- Trend arrow (↑ getting closer / ↓ getting further / → stable),
+  computed from the last 4 readings to absorb single-advertisement
+  jitter
+- Color buckets: HOT (≥-55 dBm, green) / warm (≥-70, yellow) /
+  cool (≥-85, orange) / cold (< -85, red)
+- Per-proxy table when multiple BLE proxies see the device —
+  enables "narrow to a zone" triangulation for users with
+  several ESPHome BLE proxies scattered around the house
+- Help text reminding users that walls / mirrors / multipath
+  cause jumps; the trend matters more than any single reading
+
+Subscribes to v1.12.0's `home_insights/ble_live_find` WS endpoint.
+Auto-unsubscribes when the modal closes via HA's standard
+subscription mechanism.
+
+#### Explicit maturity tags (EXP / BETA)
+
+Per the beta-launch concern: beta testers shouldn't think the
+whole app is broken when an experimental feature behaves
+unexpectedly. Each Find-My-Device button now carries an inline
+maturity badge:
+
+- **🔆 Identify** — no badge (stable since v1.6.0)
+- **👆 Touch test** — `BETA` badge (blue) — thresholds still
+  being calibrated
+- **📡 BLE live-find** — `EXP` badge (orange) — brand new in
+  v1.12.0, depends on BLE proxies / companion app BLE scanner
+
+The 📡 modal header also displays an `EXPERIMENTAL` pill so
+users opening it for the first time see the maturity upfront.
+
+EXP = orange = "expect rough edges, this is bleeding-edge."
+BETA = blue = "core works, thresholds need real-install tuning."
+The color difference signals the maturity gradient at a glance.
+
+### Requires
+
+- BLE button: HA Insights **v1.12.0+** for the
+  `ble_capability` WS endpoint + `ble_live_find` subscription
+- HA bluetooth integration loaded
+- At least one BLE scanner active (HA companion app BLE scanner
+  OR a stationary ESPHome BLE proxy)
+
+Falls back gracefully on older / missing integrations: button
+just doesn't render. Existing identify + touch-test + dedup
+flows are unaffected.
+
 ## [1.9.0] — 2026-05-17
 
 ### Changed
