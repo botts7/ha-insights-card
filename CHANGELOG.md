@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.10.12] — 2026-05-18
+
+### Added — Vendor-native identify primitives
+
+The integration WS handler now prefers vendor-specific identify
+service calls over the generic toggle / strobe / brightness-wiggle
+fallback. Supported integrations:
+
+- **ZHA**: Zigbee Identify cluster (`0x0003`, command `0x00`) —
+  the bulb / switch breathes for 3 s. Native to the Zigbee spec;
+  works on almost every ZLL/ZHA-certified device.
+- **Zigbee2MQTT**: `light.turn_on effect: blink` — Z2M's effect
+  converter routes through the Identify cluster on the device.
+- **Z-Wave JS**: Indicator command class (`0x87`) with the
+  Identify indicator ID — modern Inovelli / Zooz / GE / Aeotec
+  devices flash an indicator LED with no load cycling.
+- **LIFX**: native `effect_pulse` with `mode: blink` — HSBK
+  pulse, no power transition.
+- **Yeelight**: `start_flow` with `action: recover` — the bulb
+  returns to its starting state after flashing.
+
+Card surfaces the vendor method inline: "⚡ Vendor primitive:
+breathe via Zigbee Identify cluster (3 s)".
+
+Lights and switches on these integrations no longer fall back to
+brightness-wiggle / strobe — they get the integration-native
+primitive instead. Hue + ESPHome already had safe primitives via
+the standard FLASH_LIGHT path; no change for those.
+
 ## [1.10.11] — 2026-05-18
 
 ### Added — Backend device-graph substitution + inline hint
