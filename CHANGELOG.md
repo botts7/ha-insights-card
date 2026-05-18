@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.10.11] — 2026-05-18
+
+### Added — Backend device-graph substitution + inline hint
+
+The integration WS handler `home_insights/identify_entity` now
+performs a device-registry lookup before firing on switches and
+sirens. When a same-device sibling exists with a safer identify
+profile — a diagnostic-category light / switch, any light, or
+an entity named `led` / `status` / `indicator` — the handler
+substitutes the request to that entity and reports the
+substitution in the response payload.
+
+The card surfaces the substitution inline beneath the row:
+"💡 Identifying via the device's diagnostic light
+(light.shelly_plus_1_led) — safer than cycling the main relay."
+
+Real-install benefits:
+- **Tesla Wall Connector**: pulses the status LED instead of
+  cycling the contactor (won't interrupt an active charge).
+- **Shelly Plus 1**: blinks `light.shelly_plus_1_led` instead of
+  toggling `switch.shelly_plus_1` (won't cut power to whatever
+  load is downstream).
+- **Sonoff with custom config**: prefers `light.foo_led` over the
+  relay.
+
+Lights and media players pass through unchanged — their identify
+methods are already safe. Critical-load gate re-runs on the
+substitute as a defensive check (an LED named `fridge_led` would
+still be safe, but the rule is consistent).
+
 ## [1.10.10] — 2026-05-18
 
 ### Added — Find Device now finds passive sensors and motion sensors
