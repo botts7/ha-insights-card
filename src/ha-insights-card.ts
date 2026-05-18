@@ -3307,10 +3307,16 @@ export class HaInsightsCard extends LitElement {
                   <div class="ble-rssi-label">waiting…</div>
                 </div>`}
             <p class="ble-hint">
-              Wave your phone around. The arrow tells you whether you're
-              getting closer (↑) or further (↓) from the device. This
-              works best with a Bluetooth proxy in each major area, or
-              the HA Companion app's BLE scanner running on your phone.
+              <strong>Room-level localization.</strong> Each row above
+              is one of your stationary Bluetooth proxies — higher RSSI
+              means the device is closer to that proxy. Best results
+              with one proxy per room.
+              <br /><br />
+              <em>Note:</em> the trend arrow tracks per-advertisement
+              RSSI fluctuation (noise from the device), NOT your
+              movement. True "warmer/colder" UX requires a mobile
+              scanner — pending an HA Companion app active-scan
+              feature.
             </p>
           </div>
           <div class="dialog-footer">

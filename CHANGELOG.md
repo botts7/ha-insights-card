@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.10.8] — 2026-05-18
+
+### Added — 🔍 "Find My HA Device" in panel header
+
+Top-level entity picker — not scoped to insights. Click 🔍 Find device
+in the panel header to:
+
+1. Search every entity in your install (entity_id or friendly_name)
+2. Tick checkboxes on the ones you want to locate
+3. Integration fires the native identifier (light flash, speaker
+   chime, fan flicker) on each every 5 seconds
+4. Uncheck each entity as you find the physical device
+5. "Found them all" closes when you're done
+
+Use cases beyond insights:
+- Locate a Zigbee bulb after a rename (`light.0x0015abc...`)
+- Find which Hue light is `light.kitchen_4` out of 30 unnamed
+- Identify a moved switch with a cryptic name
+
+Same backend as the per-insight 🔆 Identify
+(`home_insights/identify_entity`); different entry point so the
+feature is discoverable independently of having insights for that
+entity.
+
+**HA-core donation candidate.** HA currently has scattered
+identifiers (`light.flash`, companion "Ring my phone") but no
+unified "find any entity" UX. Validating with real users
+before proposing to core.
+
 ## [1.10.7] — 2026-05-18
 
 ### Fixed — 🔆 Identify now loops + supports multi-entity insights
