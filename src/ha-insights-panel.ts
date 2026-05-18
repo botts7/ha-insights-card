@@ -122,6 +122,20 @@ export class HaInsightsPanel extends LitElement {
   // _diagnosticsBusy gates the button while the WS call is in flight.
   @state() private _diagnosticsJson: string | null = null;
   @state() private _diagnosticsBusy = false;
+  // v1.10.8 — Find My HA Device feature. Top-level entity picker +
+  // looping identifier. Users open from the panel header to locate
+  // ANY entity (not just ones surfaced in insights). Same backend as
+  // the per-insight 🔆 Identify (home_insights/identify_entity);
+  // different entry point. Search box filters live by entity_id /
+  // friendly_name; selected entities are added to a "currently
+  // identifying" set; loop fires identify on every selected entity
+  // every 5s until user clicks "Found them all" / "Stop".
+  @state() private _findDeviceOpen = false;
+  @state() private _findDeviceSearch = "";
+  @state() private _findDeviceSelected: Set<string> = new Set();
+  @state() private _findDeviceCount = 0;
+  @state() private _findDeviceErrors: Record<string, string> = {};
+  private _findDeviceTimer: ReturnType<typeof setInterval> | null = null;
   // Snapshot of distinct values present in the loaded insight set.
   // Drives the chip dropdown options. Refreshed on every list reload.
   @state() private _availableDomains: string[] = [];
@@ -304,6 +318,72 @@ export class HaInsightsPanel extends LitElement {
       padding: 12px 18px;
       border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
       justify-content: flex-end;
+    }
+    /* v1.10.8: Find My HA Device modal */
+    .find-device-dialog { width: min(720px, 100%); }
+    .find-device-search {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px 10px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      border-radius: 6px;
+      font-size: 0.95em;
+      margin-bottom: 8px;
+    }
+    .find-device-status {
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+      margin-bottom: 8px;
+    }
+    .find-device-list {
+      max-height: 360px;
+      overflow-y: auto;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
+      border-radius: 6px;
+    }
+    .find-device-empty {
+      padding: 18px;
+      text-align: center;
+      color: var(--secondary-text-color);
+      font-size: 0.9em;
+    }
+    .find-device-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.04));
+    }
+    .find-device-row:hover {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+    }
+    .find-device-row:last-child { border-bottom: none; }
+    .find-device-row-text {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .find-device-eid {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.88em;
+      color: var(--primary-text-color);
+    }
+    .find-device-name {
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+    }
+    .find-device-err {
+      font-size: 0.8em;
+      color: var(--warning-color, #ef6c00);
+      margin-top: 2px;
+    }
+    .find-device-truncated {
+      padding: 8px;
+      font-size: 0.82em;
+      color: var(--secondary-text-color);
+      text-align: center;
     }
     .filters {
       display: flex;
@@ -1228,6 +1308,111 @@ export class HaInsightsPanel extends LitElement {
     this._diagnosticsJson = null;
   }
 
+  // ===== v1.10.8 — Find My HA Device =====
+
+  /** Open the Find Device modal. Resets selection + counter so each
+   *  session starts clean. */
+  private _openFindDevice(): void {
+    this._findDeviceOpen = true;
+    this._findDeviceSearch = "";
+    this._findDeviceSelected = new Set();
+    this._findDeviceCount = 0;
+    this._findDeviceErrors = {};
+  }
+
+  /** Close the modal and clear the recurring identify timer. */
+  private _closeFindDevice(): void {
+    if (this._findDeviceTimer != null) {
+      clearInterval(this._findDeviceTimer);
+      this._findDeviceTimer = null;
+    }
+    const stoppedWithSelection = this._findDeviceSelected.size > 0;
+    this._findDeviceOpen = false;
+    this._findDeviceSelected = new Set();
+    this._findDeviceErrors = {};
+    this._findDeviceCount = 0;
+    if (stoppedWithSelection) {
+      this._showToast("🔍 Identification stopped.");
+    }
+  }
+
+  private _toggleFindDeviceEntity(entityId: string): void {
+    const next = new Set(this._findDeviceSelected);
+    if (next.has(entityId)) {
+      next.delete(entityId);
+      const errs = { ...this._findDeviceErrors };
+      delete errs[entityId];
+      this._findDeviceErrors = errs;
+    } else {
+      next.add(entityId);
+    }
+    this._findDeviceSelected = next;
+    // Restart the timer if user added the FIRST entity. If they
+    // unchecked the last one, stop the timer (no point firing on
+    // an empty set).
+    if (next.size > 0 && this._findDeviceTimer == null) {
+      void this._fireFindDeviceOnce();
+      this._findDeviceTimer = setInterval(
+        () => void this._fireFindDeviceOnce(),
+        5000,
+      );
+    } else if (next.size === 0 && this._findDeviceTimer != null) {
+      clearInterval(this._findDeviceTimer);
+      this._findDeviceTimer = null;
+    }
+  }
+
+  private async _fireFindDeviceOnce(): Promise<void> {
+    if (!this.hass || this._findDeviceSelected.size === 0) return;
+    const entities = Array.from(this._findDeviceSelected);
+    const results = await Promise.allSettled(
+      entities.map((entityId) =>
+        this.hass!.connection.sendMessagePromise<{ method?: string }>({
+          type: "home_insights/identify_entity",
+          entity_id: entityId,
+        }),
+      ),
+    );
+    const nextErrors: Record<string, string> = {};
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      if (r.status === "rejected") {
+        const err = r.reason as { message?: string };
+        nextErrors[entities[i]] = err.message ?? String(err);
+      }
+    }
+    this._findDeviceErrors = nextErrors;
+    this._findDeviceCount = this._findDeviceCount + 1;
+  }
+
+  /** Filter the entity list to entries matching the user's search
+   *  string. Case-insensitive substring match on entity_id +
+   *  friendly_name + domain. Capped at 100 results so the DOM stays
+   *  responsive on installs with thousands of entities. */
+  private _findDeviceMatches(): Array<{
+    entity_id: string;
+    friendly_name: string;
+  }> {
+    if (!this.hass?.states) return [];
+    const needle = this._findDeviceSearch.trim().toLowerCase();
+    const out: Array<{ entity_id: string; friendly_name: string }> = [];
+    for (const [entity_id, state] of Object.entries(this.hass.states)) {
+      const friendly =
+        (state.attributes?.friendly_name as string | undefined) ?? entity_id;
+      if (!needle) {
+        out.push({ entity_id, friendly_name: friendly });
+      } else {
+        const hay =
+          `${entity_id} ${friendly}`.toLowerCase();
+        if (hay.includes(needle)) {
+          out.push({ entity_id, friendly_name: friendly });
+        }
+      }
+      if (out.length >= 100) break;
+    }
+    return out.sort((a, b) => a.entity_id.localeCompare(b.entity_id));
+  }
+
   /** Bulk-apply all currently-visible insights (after the panel's filters
    *  have been applied). Confirms first because each apply writes a real
    *  automation. Best for power users triaging a backlog after a long
@@ -1488,6 +1673,14 @@ export class HaInsightsPanel extends LitElement {
           </button>
           <button
             class="action"
+            aria-label="Find a device in your home"
+            title="Pick any entity in your install and the integration fires its native identifier (light flash, speaker chime, fan flicker, etc.) every 5 seconds until you click 'Found it!'. Useful for locating an unfamiliar entity like 'light.0x0015...' or 'switch.unnamed_3'."
+            @click=${this._openFindDevice}
+          >
+            <ha-icon icon="mdi:map-search"></ha-icon> 🔍 Find device
+          </button>
+          <button
+            class="action"
             ?disabled=${this._bulkBusy}
             aria-label="Apply every visible automation insight"
             title="Apply every visible automation insight (respects search + confidence filters)"
@@ -1590,7 +1783,98 @@ export class HaInsightsPanel extends LitElement {
       </div>
       ${this._renderAuditLog()}
       ${this._renderDiagnosticsModal()}
+      ${this._renderFindDeviceModal()}
       ${this._toast ? html`<div class="toast">${this._toast}</div>` : ""}
+    `;
+  }
+
+  /** v1.10.8: Find My HA Device modal. Top-level entity picker that
+   *  lets users locate ANY entity, not just ones surfaced in insights.
+   *
+   *  UI:
+   *   - Search input (live-filters entities by entity_id / friendly_name)
+   *   - Scrollable list capped at 100 results (DOM perf on big installs)
+   *   - Each row: checkbox + entity_id (mono) + friendly_name
+   *   - Footer: "{N} selected, fired {C} times" + Found / Stop buttons
+   *   - Per-entity error pills surface alongside the checkbox row when
+   *     a fire fails (entity doesn't support identify, etc.)
+   *
+   *  Behaviour: checking an entity adds it to the looping fire set;
+   *  unchecking removes it. Loop is started/stopped automatically by
+   *  _toggleFindDeviceEntity based on set size. No per-entity action
+   *  needed — just check, listen, uncheck when found. */
+  private _renderFindDeviceModal(): TemplateResult | "" {
+    if (!this._findDeviceOpen) return "";
+    const matches = this._findDeviceMatches();
+    const selectedCount = this._findDeviceSelected.size;
+    return html`
+      <div class="diagnostics-backdrop" @click=${this._closeFindDevice}>
+        <div
+          class="diagnostics-dialog find-device-dialog"
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="diagnostics-header">
+            <strong>🔍 Find a device</strong>
+            <button
+              class="diagnostics-close"
+              aria-label="Close"
+              @click=${this._closeFindDevice}
+            >×</button>
+          </div>
+          <div class="diagnostics-body">
+            <p class="diagnostics-hint">
+              Pick any entity below — the integration fires its native
+              identifier (light flash, speaker chime, fan flicker)
+              every 5 seconds until you uncheck it. Check several to
+              identify them all at once. Loop starts the moment you
+              check the first one.
+            </p>
+            <input
+              type="search"
+              class="find-device-search"
+              placeholder="Search entity_id or friendly_name…"
+              .value=${this._findDeviceSearch}
+              @input=${(e: Event) =>
+                (this._findDeviceSearch = (e.target as HTMLInputElement).value)}
+            />
+            <div class="find-device-status">
+              ${selectedCount} selected · fired ${this._findDeviceCount}
+              ${this._findDeviceCount === 1 ? "time" : "times"}
+            </div>
+            <div class="find-device-list">
+              ${matches.length === 0
+                ? html`<div class="find-device-empty">No matching entities.</div>`
+                : matches.map((m) => {
+                    const err = this._findDeviceErrors[m.entity_id];
+                    return html`
+                      <label class="find-device-row">
+                        <input
+                          type="checkbox"
+                          ?checked=${this._findDeviceSelected.has(m.entity_id)}
+                          @change=${() => this._toggleFindDeviceEntity(m.entity_id)}
+                        />
+                        <div class="find-device-row-text">
+                          <span class="find-device-eid">${m.entity_id}</span>
+                          <span class="find-device-name">${m.friendly_name}</span>
+                          ${err ? html`<span class="find-device-err">${err}</span>` : ""}
+                        </div>
+                      </label>
+                    `;
+                  })}
+            </div>
+            ${matches.length >= 100
+              ? html`<div class="find-device-truncated">
+                  Showing first 100 — refine your search to narrow.
+                </div>`
+              : ""}
+          </div>
+          <div class="diagnostics-actions">
+            <button class="action primary" @click=${this._closeFindDevice}>
+              ✅ Found them all — close
+            </button>
+          </div>
+        </div>
+      </div>
     `;
   }
 
