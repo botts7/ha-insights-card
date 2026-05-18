@@ -36,6 +36,49 @@ import type { AuditLogCall, CardConfig, HassLite } from "./types";
 // bundle. Always current with the integration's panel.js, regardless
 // of what HACS has done with the dashboard card.
 const PANEL_CARD_TAG = "ha-insights-card-bundled";
+
+/** Domains whose entities can be physically identified — must stay
+ *  aligned with `lib/identify_capability.py::identify_capability_for`.
+ *  Listing software-only domains (automation, scene, script, calendar,
+ *  sensor, etc.) in the Find-Device modal frustrates the user because
+ *  the backend returns NONE and the loop reports "no identify method
+ *  available". Filter at the source instead. */
+const FINDABLE_DOMAINS: ReadonlySet<string> = new Set([
+  "light",
+  "switch",
+  "media_player",
+  "siren",
+]);
+
+/** Per-domain loop cadence for the panel-level Find Device modal.
+ *  Tuned so total fire rate over a long search session looks like
+ *  a curious human poking, not a robotic loop. Switches especially
+ *  must be slow — many smart-light vendors interpret rapid on/off
+ *  cycles as factory-reset triggers (Tuya: 3× in 10 s; Aqara: 5× in
+ *  5 s; Hue: 5× in 10 s). Even though the per-fire pattern stays
+ *  under those thresholds, looping a 2-toggle burst every 5 s
+ *  aggregates to 240+ toggles over 10 minutes — relay-killing and
+ *  log-noise. Per-domain cadence keeps the AGGREGATE rate sane. */
+const FIND_DEVICE_CADENCE_MS: Readonly<Record<string, number>> = {
+  light: 5000,
+  media_player: 6000,
+  siren: 10000,
+  switch: 12000,
+};
+const FIND_DEVICE_DEFAULT_CADENCE_MS = 5000;
+
+/** Hard safety ceiling on a Find Device session. After this elapses
+ *  the loop auto-stops with a toast — covers the case where the
+ *  user forgets the modal is open or leaves the tab. 5 minutes is
+ *  long enough for any honest search (walk every room) but short
+ *  enough that an abandoned session can't accumulate hundreds of
+ *  toggles unattended. */
+const FIND_DEVICE_MAX_SESSION_MS = 5 * 60 * 1000;
+/** Max fires per individual entity before that entity auto-stops
+ *  (the rest of the selection keeps going). At 12 s switch cadence
+ *  this caps switches at 30 toggles total even if the user never
+ *  unchecks them. */
+const FIND_DEVICE_MAX_FIRES_PER_ENTITY = 30;
 if (!customElements.get(PANEL_CARD_TAG)) {
   customElements.define(
     PANEL_CARD_TAG,
@@ -136,6 +179,19 @@ export class HaInsightsPanel extends LitElement {
   @state() private _findDeviceCount = 0;
   @state() private _findDeviceErrors: Record<string, string> = {};
   private _findDeviceTimer: ReturnType<typeof setInterval> | null = null;
+  // Safety ceilings — both the panel-wide elapsed time and the
+  // per-entity fire count are gated so an abandoned session can't
+  // accumulate hundreds of toggles. See FIND_DEVICE_MAX_SESSION_MS
+  // and FIND_DEVICE_MAX_FIRES_PER_ENTITY constants.
+  private _findDeviceSessionStartedAt = 0;
+  @state() private _findDeviceFireCounts: Record<string, number> = {};
+  @state() private _findDeviceSessionElapsedMs = 0;
+  // Per-entity user acknowledgement that they UNDERSTAND this entity
+  // will be power-cycled (switch toggle / strobe / siren chirp). The
+  // backend WS handler refuses to fire power-cycle methods until the
+  // card sends confirm_power_cycle=true. Once the user confirms once,
+  // we remember it for the duration of the modal session.
+  private _findDevicePowerCycleConfirmed: Set<string> = new Set();
   // Snapshot of distinct values present in the loaded insight set.
   // Drives the chip dropdown options. Refreshed on every list reload.
   @state() private _availableDomains: string[] = [];
@@ -1331,6 +1387,10 @@ export class HaInsightsPanel extends LitElement {
     this._findDeviceSelected = new Set();
     this._findDeviceErrors = {};
     this._findDeviceCount = 0;
+    this._findDeviceFireCounts = {};
+    this._findDeviceSessionStartedAt = 0;
+    this._findDeviceSessionElapsedMs = 0;
+    this._findDevicePowerCycleConfirmed = new Set();
     if (stoppedWithSelection) {
       this._showToast("🔍 Identification stopped.");
     }
@@ -1343,52 +1403,179 @@ export class HaInsightsPanel extends LitElement {
       const errs = { ...this._findDeviceErrors };
       delete errs[entityId];
       this._findDeviceErrors = errs;
+      const counts = { ...this._findDeviceFireCounts };
+      delete counts[entityId];
+      this._findDeviceFireCounts = counts;
     } else {
       next.add(entityId);
     }
     this._findDeviceSelected = next;
     // Restart the timer if user added the FIRST entity. If they
     // unchecked the last one, stop the timer (no point firing on
-    // an empty set).
+    // an empty set). 1 s polling interval is the timer tick — each
+    // entity decides per-tick whether IT is due to fire based on
+    // its per-domain cadence + last-fire timestamp.
     if (next.size > 0 && this._findDeviceTimer == null) {
+      this._findDeviceSessionStartedAt = Date.now();
+      this._findDeviceSessionElapsedMs = 0;
       void this._fireFindDeviceOnce();
       this._findDeviceTimer = setInterval(
         () => void this._fireFindDeviceOnce(),
-        5000,
+        1000,
       );
     } else if (next.size === 0 && this._findDeviceTimer != null) {
       clearInterval(this._findDeviceTimer);
       this._findDeviceTimer = null;
+      this._findDeviceSessionStartedAt = 0;
+      this._findDeviceSessionElapsedMs = 0;
     }
+  }
+
+  /** Timer tick. Runs at 1 s cadence; per-entity cadence is enforced
+   *  by checking the entity's last-fire time against its
+   *  domain-specific FIND_DEVICE_CADENCE_MS. Hard ceilings auto-stop
+   *  individual entities (FIND_DEVICE_MAX_FIRES_PER_ENTITY) and the
+   *  whole session (FIND_DEVICE_MAX_SESSION_MS). */
+  private _findDeviceLastFiredAt: Record<string, number> = {};
+
+  /** Format remaining session time as `m:ss`. Hits 0:00 right before
+   *  the auto-stop fires, so the toast is the visual confirmation. */
+  private _formatFindDeviceRemaining(): string {
+    const elapsed = this._findDeviceSessionElapsedMs;
+    const remaining = Math.max(0, FIND_DEVICE_MAX_SESSION_MS - elapsed);
+    const totalSec = Math.ceil(remaining / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
   }
 
   private async _fireFindDeviceOnce(): Promise<void> {
     if (!this.hass || this._findDeviceSelected.size === 0) return;
-    const entities = Array.from(this._findDeviceSelected);
+    const now = Date.now();
+
+    // Session-level safety ceiling. Auto-stop everything after the
+    // hard maximum. Toast tells the user why and how to resume.
+    if (this._findDeviceSessionStartedAt > 0) {
+      this._findDeviceSessionElapsedMs = now - this._findDeviceSessionStartedAt;
+      if (this._findDeviceSessionElapsedMs >= FIND_DEVICE_MAX_SESSION_MS) {
+        if (this._findDeviceTimer != null) {
+          clearInterval(this._findDeviceTimer);
+          this._findDeviceTimer = null;
+        }
+        this._findDeviceSelected = new Set();
+        this._findDeviceSessionStartedAt = 0;
+        this._showToast(
+          "🔍 Auto-stopped after 5 min. Re-check entities to keep looking.",
+        );
+        return;
+      }
+    }
+
+    // Pick entities that are DUE to fire this tick based on their
+    // per-domain cadence + last-fired timestamp. Also enforces the
+    // per-entity fire-count ceiling.
+    const due: string[] = [];
+    const nextSelected = new Set(this._findDeviceSelected);
+    const nextCounts = { ...this._findDeviceFireCounts };
+    for (const entityId of this._findDeviceSelected) {
+      const fires = nextCounts[entityId] ?? 0;
+      if (fires >= FIND_DEVICE_MAX_FIRES_PER_ENTITY) {
+        // This entity hit its individual ceiling. Quietly remove
+        // it from the active loop — the user still sees the row,
+        // can re-check to resume, but the loop stops accumulating
+        // toggles on a possibly-abandoned entity.
+        nextSelected.delete(entityId);
+        continue;
+      }
+      const domain = entityId.split(".", 1)[0];
+      const cadence =
+        FIND_DEVICE_CADENCE_MS[domain] ?? FIND_DEVICE_DEFAULT_CADENCE_MS;
+      const last = this._findDeviceLastFiredAt[entityId] ?? 0;
+      if (last === 0 || now - last >= cadence) {
+        due.push(entityId);
+      }
+    }
+    if (nextSelected.size !== this._findDeviceSelected.size) {
+      this._findDeviceSelected = nextSelected;
+    }
+    if (due.length === 0) {
+      this._findDeviceFireCounts = nextCounts;
+      return;
+    }
+    type IdentifyResp = {
+      method?: string;
+      description?: string;
+      requires_confirmation?: boolean;
+      warning?: string;
+      calls_made?: number;
+    };
     const results = await Promise.allSettled(
-      entities.map((entityId) =>
-        this.hass!.connection.sendMessagePromise<{ method?: string }>({
+      due.map((entityId) =>
+        this.hass!.connection.sendMessagePromise<IdentifyResp>({
           type: "home_insights/identify_entity",
           entity_id: entityId,
+          confirm_power_cycle: this._findDevicePowerCycleConfirmed.has(
+            entityId,
+          ),
         }),
       ),
     );
-    const nextErrors: Record<string, string> = {};
+    const nextErrors = { ...this._findDeviceErrors };
     for (let i = 0; i < results.length; i++) {
       const r = results[i];
+      const entityId = due[i];
+      this._findDeviceLastFiredAt[entityId] = now;
       if (r.status === "rejected") {
         const err = r.reason as { message?: string };
-        nextErrors[entities[i]] = err.message ?? String(err);
+        nextErrors[entityId] = err.message ?? String(err);
+        // Don't count failed fires against the cap — keyword refusals
+        // would otherwise hit 30 instantly and the row would auto-drop
+        // before the user noticed the error.
+      } else if (r.value.requires_confirmation) {
+        // Backend asked for explicit power-cycle confirmation.
+        // Synchronous browser confirm() is OK here — modal is already
+        // blocking the page, this just adds another layer.
+        const warning =
+          r.value.warning ??
+          `Power-cycle ${entityId}? This will turn it on/off.`;
+        const ok = window.confirm(
+          `⚠️ Confirm power-cycle\n\n${warning}\n\n` +
+            "Click OK to allow. Click Cancel to skip this entity " +
+            "(stays in selection but won't fire).",
+        );
+        if (ok) {
+          this._findDevicePowerCycleConfirmed.add(entityId);
+          // Don't count this tick; next tick will retry with the
+          // confirmation flag set and actually fire.
+        } else {
+          nextErrors[entityId] = "User declined power-cycle confirmation.";
+          // Remove from active loop — keep checkbox visible but
+          // don't keep prompting.
+          const drop = new Set(this._findDeviceSelected);
+          drop.delete(entityId);
+          this._findDeviceSelected = drop;
+        }
+      } else {
+        nextCounts[entityId] = (nextCounts[entityId] ?? 0) + 1;
+        delete nextErrors[entityId];
       }
     }
     this._findDeviceErrors = nextErrors;
+    this._findDeviceFireCounts = nextCounts;
     this._findDeviceCount = this._findDeviceCount + 1;
   }
 
   /** Filter the entity list to entries matching the user's search
    *  string. Case-insensitive substring match on entity_id +
-   *  friendly_name + domain. Capped at 100 results so the DOM stays
-   *  responsive on installs with thousands of entities. */
+   *  friendly_name. Capped at 100 results so the DOM stays
+   *  responsive on installs with thousands of entities.
+   *
+   *  Only physically-findable domains are returned — automation,
+   *  scene, script, sensor, calendar, etc. are software constructs
+   *  with no identify signal (`lib/identify_capability.py` returns
+   *  NONE for them), so listing them in the modal just frustrates
+   *  the user. Domain list must stay aligned with the backend's
+   *  `identify_capability_for` whitelist. */
   private _findDeviceMatches(): Array<{
     entity_id: string;
     friendly_name: string;
@@ -1397,6 +1584,8 @@ export class HaInsightsPanel extends LitElement {
     const needle = this._findDeviceSearch.trim().toLowerCase();
     const out: Array<{ entity_id: string; friendly_name: string }> = [];
     for (const [entity_id, state] of Object.entries(this.hass.states)) {
+      const domain = entity_id.split(".", 1)[0];
+      if (!FINDABLE_DOMAINS.has(domain)) continue;
       const friendly =
         (state.attributes?.friendly_name as string | undefined) ?? entity_id;
       if (!needle) {
@@ -1823,11 +2012,32 @@ export class HaInsightsPanel extends LitElement {
           </div>
           <div class="diagnostics-body">
             <p class="diagnostics-hint">
-              Pick any entity below — the integration fires its native
-              identifier (light flash, speaker chime, fan flicker)
-              every 5 seconds until you uncheck it. Check several to
-              identify them all at once. Loop starts the moment you
-              check the first one.
+              Only entities with a built-in identifier are listed:
+              lights (flash / strobe), switches (toggle click), media
+              players (chime), sirens (chirp). Automations, scenes,
+              and scripts are software constructs — they have no
+              physical body to find. Pick any entity below and the
+              integration fires its native identifier every 5 seconds
+              until you uncheck it.
+            </p>
+            <p class="diagnostics-hint" style="color: var(--secondary-text-color); font-size: 0.85em;">
+              💡 To find a passive sensor (temperature, humidity, CO₂,
+              illuminance, sound, moisture), open the insight where it
+              appears and use the <strong>👆 Touch test</strong> button —
+              touch the sensor and the integration tells you which
+              entity actually spiked. For motion / occupancy sensors,
+              walk through each room and watch the live state for the
+              one that fires.
+            </p>
+            <p class="diagnostics-hint" style="color: var(--secondary-text-color); font-size: 0.85em;">
+              ⚠️ <strong>Safety:</strong> sessions auto-stop after 5
+              minutes; each entity tops out at 30 fires. Lights pulse
+              brightness without power-cycling (safe for Tuya / Aqara /
+              Hue, which interpret rapid on/off as pairing-mode
+              triggers); switches click twice every 12 s so the
+              aggregate looks like a human searching. If a switch is
+              hard-wired to a smart bulb, the bulb will flicker too —
+              that's how the wiring is, not a bug.
             </p>
             <input
               type="search"
@@ -1840,6 +2050,10 @@ export class HaInsightsPanel extends LitElement {
             <div class="find-device-status">
               ${selectedCount} selected · fired ${this._findDeviceCount}
               ${this._findDeviceCount === 1 ? "time" : "times"}
+              ${this._findDeviceTimer != null
+                ? html` · auto-stop in
+                    ${this._formatFindDeviceRemaining()}`
+                : ""}
             </div>
             <div class="find-device-list">
               ${matches.length === 0
