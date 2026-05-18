@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.10.4] — 2026-05-18
+
+### Added — 🔬 Diagnostics button in panel header
+
+Calls `home_insights/export_dev_audit` (shipped in integration
+v1.12.15) and opens a modal showing the redacted JSON. Two actions:
+**Copy to clipboard** (for AI chat or GitHub issue) and **Close**.
+
+What the bundle contains: domain-bucketed entity counts, integration
+list, per-detector activity counts, event buffer signature, config
+fingerprint. What it does NOT contain: entity friendly names,
+automation aliases, IPs, lat/long. Designed to be safely shared.
+
+Closes the most visible "we built this but you can't find it" gap
+flagged in the UX-consumption audit: the integration already had a
+fully-redacted snapshot mechanism, but only invokable from HA's
+Developer Tools → WebSocket. Now a single click from the panel.
+
 ## [1.10.3] — 2026-05-17
 
 ### Added — 🆕 "newly added" entity badge
