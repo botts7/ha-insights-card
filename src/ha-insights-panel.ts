@@ -244,6 +244,15 @@ export class HaInsightsPanel extends LitElement {
     string,
     { to: string; reason: string }
   > = {};
+  // v1.10.12 — backend may report `vendor_native: true` when the
+  // fire used a vendor-specific primitive (ZHA Identify cluster,
+  // Z-Wave Indicator CC, LIFX pulse, Yeelight flow, Z2M effect).
+  // Card surfaces the method label so users know which primitive
+  // is being used.
+  @state() private _findDeviceVendorMethods: Record<
+    string,
+    { label: string; description: string }
+  > = {};
   // Snapshot of distinct values present in the loaded insight set.
   // Drives the chip dropdown options. Refreshed on every list reload.
   @state() private _availableDomains: string[] = [];
@@ -499,6 +508,15 @@ export class HaInsightsPanel extends LitElement {
       padding: 4px 8px;
       border-left: 2px solid var(--success-color, #4caf50);
       background: rgba(76, 175, 80, 0.06);
+      border-radius: 2px;
+    }
+    .find-device-vendor {
+      font-size: 0.78em;
+      color: var(--primary-text-color);
+      margin-top: 4px;
+      padding: 4px 8px;
+      border-left: 2px solid var(--info-color, #3b82f6);
+      background: rgba(59, 130, 246, 0.06);
       border-radius: 2px;
     }
     .find-device-watch-hint {
@@ -1488,6 +1506,7 @@ export class HaInsightsPanel extends LitElement {
     this._findDeviceSessionElapsedMs = 0;
     this._findDevicePowerCycleConfirmed = new Set();
     this._findDeviceSubstitutions = {};
+    this._findDeviceVendorMethods = {};
     this._findDeviceWatchBaselines = {};
     this._findDeviceWatchCurrent = {};
     this._findDeviceWatchDetected = new Set();
@@ -1734,6 +1753,7 @@ export class HaInsightsPanel extends LitElement {
       requires_confirmation?: boolean;
       warning?: string;
       calls_made?: number;
+      vendor_native?: boolean;
       substitution?: {
         from: string;
         to: string;
@@ -1801,6 +1821,20 @@ export class HaInsightsPanel extends LitElement {
           const next = { ...this._findDeviceSubstitutions };
           delete next[entityId];
           this._findDeviceSubstitutions = next;
+        }
+        // Cache vendor-native method when the backend used one.
+        if (r.value.vendor_native && r.value.method && r.value.description) {
+          this._findDeviceVendorMethods = {
+            ...this._findDeviceVendorMethods,
+            [entityId]: {
+              label: r.value.method,
+              description: r.value.description,
+            },
+          };
+        } else if (this._findDeviceVendorMethods[entityId]) {
+          const next = { ...this._findDeviceVendorMethods };
+          delete next[entityId];
+          this._findDeviceVendorMethods = next;
         }
       }
     }
@@ -2383,6 +2417,14 @@ export class HaInsightsPanel extends LitElement {
                           this._findDeviceSubstitutions[m.entity_id]
                             ? html`<span class="find-device-substitution">
                                 💡 ${this._findDeviceSubstitutions[m.entity_id].reason}
+                              </span>`
+                            : ""}
+                          ${m.mode === "fire" &&
+                          checked &&
+                          this._findDeviceVendorMethods[m.entity_id]
+                            ? html`<span class="find-device-vendor">
+                                ⚡ Vendor primitive:
+                                ${this._findDeviceVendorMethods[m.entity_id].description}
                               </span>`
                             : ""}
                           ${m.mode === "perturb" && checked
