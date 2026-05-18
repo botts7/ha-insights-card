@@ -125,6 +125,13 @@ export interface Insight {
   /** v1.4: ISO timestamp when the user dismissed this insight, or
    *  null. Only surfaced when list was called with `include_dismissed`. */
   dismissed_at?: string | null;
+  /** v1.12.11: integer days since the primary entity was added to HA.
+   *  Server only sets this when the entity is within
+   *  NEWLY_ADDED_THRESHOLD_DAYS (14) — absent = "not newly added" or
+   *  "registry doesn't expose created_at" (pre-HA-2024.10). Card renders
+   *  a 🆕 "added N days ago" badge so users can spot insights where the
+   *  dataset window may be short. */
+  entity_age_days?: number;
 }
 
 export interface AutomationLink {

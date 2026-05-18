@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.10.3] — 2026-05-17
+
+### Added — 🆕 "newly added" entity badge
+
+Pairs with integration v1.12.11. When an insight's primary entity
+was added to Home Assistant within the last 14 days, the integration
+now stamps `entity_age_days` on the payload; the card renders a
+sky-blue `🆕 added N days ago` badge next to the title (and in the
+detail-dialog header).
+
+The badge surfaces a dataset-window limit so users understand WHY
+a detector might surface a hedged or low-confidence finding on an
+entity that hasn't been around long. Complements integration
+v1.12.9's internal state_shift guard.
+
+`Insight.entity_age_days?: number` is optional and only present when
+within the threshold — absence means "not newly added" OR "older HA
+without `RegistryEntry.created_at`" (pre-2024.10). Either way: no
+badge, no surprise.
+
+Day-name pluralisation handled inline: 0 → "added today",
+1 → "added yesterday", N → "added N days ago".
+
 ## [1.10.2] — 2026-05-17
 
 ### Added — specialized card-body renderers for v1.7+ insights
