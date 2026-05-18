@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.10.9] — 2026-05-18
+
+### Fixed — Identify modal restores state + defaults to 1-at-a-time
+
+Real-install report: Circadian Lighting users (and anyone with
+auto-off automations) found the strobe fallback path disruptive
+because the light stayed ON at default brightness/colour. Cohort
+insights firing all 12 entities at once were also disruptive.
+
+**State capture + restore.** Before the first fire on each entity,
+snapshot `hass.states[entityId].state` + brightness/color_temp/
+rgb_color/etc. On Stop / Found it / uncheck / close, restore via
+`light.turn_on` with original attrs (or `turn_off`). Switch / fan /
+input_boolean restore on/off. Media_player / siren auto-end so no
+restore needed.
+
+Honors Circadian's last-set colour temperature, scenes the user
+had applied before clicking Identify, and stops auto-off automations
+from triggering mid-search.
+
+**1-at-a-time default.** Multi-entity insights now open with NO row
+selected — user clicks ONE row to start identifying it. Clicking
+another row switches (restores the previous, starts the new). A
+"Fire all simultaneously (advanced)" toggle keeps the v1.10.7
+behaviour for power users.
+
+Active row gets a warning-color highlight + left border so the user
+always knows what's firing.
+
 ## [1.10.8] — 2026-05-18
 
 ### Added — 🔍 "Find My HA Device" in panel header

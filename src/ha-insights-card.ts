@@ -147,6 +147,27 @@ export class HaInsightsCard extends LitElement {
   @state() private _identifySelected: Set<string> = new Set();
   @state() private _identifyAllEntities: string[] = [];
   private _identifyTimer: ReturnType<typeof setInterval> | null = null;
+  /** v1.10.9: default to firing ONE entity at a time. User can opt
+   *  into "Fire all simultaneously" via a toggle in the modal — but
+   *  the default mental model matches "I'm looking for ONE thing"
+   *  and avoids strobing a whole cohort of lights at once (especially
+   *  bad with Circadian Lighting + auto-off automations). */
+  @state() private _identifyOneAtATime = true;
+  /** v1.10.9: state snapshot per entity captured at first fire so we
+   *  can restore at Stop / Found / uncheck. Maps entity_id → the
+   *  state value + relevant attributes (brightness/color_temp/rgb)
+   *  read from `hass.states` BEFORE identify started.
+   *
+   *  Without this, FALLBACK strobe mode (cheap Tuya/Zigbee lights that
+   *  don't expose SUPPORT_FLASH) leaves the light ON at default
+   *  brightness/color, which Circadian then re-overrides 1-2s later
+   *  AND tripping any auto-off automation tied to the state change.
+   *  Restoration honors whatever the user / Circadian / scenes had
+   *  set the entity to before they hit Identify. */
+  private _identifySnapshots = new Map<
+    string,
+    { state: string; attrs: Record<string, unknown> }
+  >();
   /** v1.10.6: BLE live-find state. Populated when user clicks the
    *  📡 BLE find button in the insight detail-dialog. Subscription
    *  delivers per-scanner RSSI updates; modal shows latest reading +
@@ -850,6 +871,21 @@ export class HaInsightsCard extends LitElement {
     }
     .identify-entity-row:hover {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+    }
+    /* v1.10.9: visual emphasis for the entity currently being identified */
+    .identify-entity-row.active {
+      background: rgba(245, 158, 11, 0.18);
+      border-left: 3px solid var(--warning-color, #f59e0b);
+    }
+    .identify-mode-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      margin: 4px 0 8px 0;
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+      cursor: pointer;
     }
     /* v1.10.6: BLE find modal — narrow + tall, centered RSSI readout */
     .ble-find-dialog { max-width: 480px; }
@@ -2994,19 +3030,35 @@ export class HaInsightsCard extends LitElement {
       return;
     }
     this._identifyAllEntities = entities;
-    this._identifySelected = new Set(entities);  // all checked by default
-    this._identifyEntityId = entities[0];        // legacy single-entity field
+    this._identifyEntityId = entities[0];  // legacy single-entity field
     this._identifyMethod = "";
     this._identifyCount = 0;
     this._identifyError = "";
     this._identifyOpen = true;
-    // Fire immediately so the user sees instant feedback, then schedule
-    // the recurring fire.
-    await this._fireIdentifyOnce();
-    if (this._identifyTimer != null) clearInterval(this._identifyTimer);
-    this._identifyTimer = setInterval(() => {
-      void this._fireIdentifyOnce();
-    }, 5000);
+
+    if (entities.length === 1) {
+      // Single-entity insight: capture + auto-start so the user
+      // doesn't have to click a row. Same UX as v1.10.5.
+      this._captureEntityState(entities[0]);
+      this._identifySelected = new Set(entities);
+      if (this._identifyTimer != null) clearInterval(this._identifyTimer);
+      await this._fireIdentifyOnce();
+      this._identifyTimer = setInterval(
+        () => void this._fireIdentifyOnce(),
+        5000,
+      );
+    } else {
+      // v1.10.9: multi-entity insights open with NOTHING selected.
+      // User picks which entity to identify first (1-at-a-time by
+      // default; toggle to fire-all is available). Prevents stampede
+      // strobing of 12 cohort lights at once, which is disruptive
+      // with Circadian Lighting / auto-off automations.
+      this._identifySelected = new Set();
+      if (this._identifyTimer != null) {
+        clearInterval(this._identifyTimer);
+        this._identifyTimer = null;
+      }
+    }
   }
 
   /** Fire the identifier ONCE. Used by both the initial click and the
@@ -3049,28 +3101,178 @@ export class HaInsightsCard extends LitElement {
     }
   }
 
-  /** Toggle whether a specific entity is currently being identified.
-   *  Cohort + multi-entity insights surface every referenced entity
-   *  as a checkbox in the modal — user can deselect ones they've
-   *  already found to narrow down which device is which. */
+  /** v1.10.9: toggle an entity in the identify set.
+   *
+   *  In 1-at-a-time mode (default): selecting an entity replaces the
+   *  current selection, deselecting clears it. State is restored on
+   *  every entity that drops out of the set.
+   *
+   *  In all-at-once mode: same as v1.10.7 — checkboxes accumulate.
+   */
   private _toggleIdentifyEntity(entityId: string): void {
     const next = new Set(this._identifySelected);
-    if (next.has(entityId)) {
-      next.delete(entityId);
+    const wasSelected = next.has(entityId);
+
+    if (this._identifyOneAtATime) {
+      // Radio behaviour: clicking always switches to JUST this entity
+      // (or deselects it if it's already the only active one).
+      const dropped = Array.from(next).filter((e) => e !== entityId);
+      for (const e of dropped) void this._restoreEntityState(e);
+      if (wasSelected) {
+        // User clicked the active entity → deselect entirely.
+        void this._restoreEntityState(entityId);
+        this._identifySelected = new Set();
+      } else {
+        // Capture state for the newly-selected entity BEFORE the first
+        // fire so we know what to restore.
+        this._captureEntityState(entityId);
+        this._identifySelected = new Set([entityId]);
+      }
     } else {
-      next.add(entityId);
+      // All-at-once: accumulate checkboxes.
+      if (wasSelected) {
+        next.delete(entityId);
+        void this._restoreEntityState(entityId);
+      } else {
+        this._captureEntityState(entityId);
+        next.add(entityId);
+      }
+      this._identifySelected = next;
     }
-    this._identifySelected = next;
+
+    // Start/stop the timer based on whether anything is selected.
+    if (this._identifySelected.size > 0 && this._identifyTimer == null) {
+      void this._fireIdentifyOnce();
+      this._identifyTimer = setInterval(
+        () => void this._fireIdentifyOnce(),
+        5000,
+      );
+    } else if (this._identifySelected.size === 0 && this._identifyTimer != null) {
+      clearInterval(this._identifyTimer);
+      this._identifyTimer = null;
+    }
+  }
+
+  /** v1.10.9: toggle "Fire all simultaneously" vs default 1-at-a-time. */
+  private _toggleIdentifyMode(): void {
+    this._identifyOneAtATime = !this._identifyOneAtATime;
+    if (this._identifyOneAtATime && this._identifySelected.size > 1) {
+      // Switching back to single mode: keep the first selected entity,
+      // restore the rest.
+      const keep = Array.from(this._identifySelected)[0];
+      const dropped = Array.from(this._identifySelected).slice(1);
+      for (const e of dropped) void this._restoreEntityState(e);
+      this._identifySelected = new Set([keep]);
+    }
+  }
+
+  /** v1.10.9: capture an entity's current state + attributes so we can
+   *  restore on Stop / Found it / uncheck. Important for STROBE
+   *  fallback path (cheap lights without SUPPORT_FLASH) where the
+   *  manual on/off pattern would otherwise leave the light at default
+   *  brightness / color, breaking Circadian Lighting + auto-off
+   *  automations.
+   */
+  private _captureEntityState(entityId: string): void {
+    const st = this.hass?.states?.[entityId];
+    if (!st) return;
+    if (this._identifySnapshots.has(entityId)) return;  // don't overwrite
+    this._identifySnapshots.set(entityId, {
+      state: st.state,
+      attrs: { ...st.attributes },
+    });
+  }
+
+  /** v1.10.9: restore an entity's pre-identify state. Called from
+   *  every stop path (uncheck, "Found it!", "Stop", modal close).
+   *
+   *  Light: restore on/off + brightness + color_temp + rgb_color.
+   *  Switch/fan: restore on/off.
+   *  media_player, siren, others: no-op (chimes auto-end).
+   *
+   *  Errors are swallowed — restore is best-effort; failing because
+   *  the entity disappeared is fine.
+   */
+  private async _restoreEntityState(entityId: string): Promise<void> {
+    if (!this.hass) return;
+    const snap = this._identifySnapshots.get(entityId);
+    if (!snap) return;
+    this._identifySnapshots.delete(entityId);
+    const domain = entityId.split(".")[0];
+    try {
+      if (domain === "light") {
+        if (snap.state === "off" || snap.state === "unavailable") {
+          await this.hass.connection.sendMessagePromise({
+            type: "call_service",
+            domain: "light",
+            service: "turn_off",
+            target: { entity_id: entityId },
+          });
+        } else {
+          // Restore on with whatever colour / brightness was set before.
+          // Skip null/undefined attrs so HA uses the entity's last known
+          // values rather than rejecting the call.
+          const restoreAttrs: Record<string, unknown> = {};
+          for (const key of [
+            "brightness",
+            "color_temp",
+            "color_temp_kelvin",
+            "rgb_color",
+            "rgbw_color",
+            "rgbww_color",
+            "hs_color",
+            "xy_color",
+            "effect",
+          ]) {
+            const v = snap.attrs[key];
+            if (v !== undefined && v !== null) restoreAttrs[key] = v;
+          }
+          await this.hass.connection.sendMessagePromise({
+            type: "call_service",
+            domain: "light",
+            service: "turn_on",
+            target: { entity_id: entityId },
+            service_data: restoreAttrs,
+          });
+        }
+      } else if (domain === "switch" || domain === "fan" || domain === "input_boolean") {
+        const service = snap.state === "on" ? "turn_on" : "turn_off";
+        await this.hass.connection.sendMessagePromise({
+          type: "call_service",
+          domain,
+          service,
+          target: { entity_id: entityId },
+        });
+      }
+      // media_player / siren / other: nothing to restore (chime auto-ends).
+    } catch {
+      // best-effort; if entity is gone, no-op.
+    }
   }
 
   /** Close the identify modal and clear the recurring timer. Called by
-   *  both "Found it!" and "Stop" — only difference is the toast text. */
-  private _stopIdentify(found: boolean): void {
+   *  both "Found it!" and "Stop" — only difference is the toast text.
+   *
+   *  v1.10.9: also restore every captured entity to its pre-identify
+   *  state. Avoids leaving the light ON at default brightness after
+   *  the strobe fallback path, plus avoids stomping Circadian /
+   *  auto-off automations. */
+  private async _stopIdentify(found: boolean): Promise<void> {
     if (this._identifyTimer != null) {
       clearInterval(this._identifyTimer);
       this._identifyTimer = null;
     }
     const entityCount = this._identifySelected.size;
+    // Restore state for every entity that has a snapshot. Use the
+    // snapshot map (not _identifySelected) so we restore EVERY entity
+    // we ever fired on during this session, not just the currently-
+    // selected ones (which could be a subset after the user unchecked
+    // some during the session).
+    const restorePromises: Promise<void>[] = [];
+    for (const entityId of Array.from(this._identifySnapshots.keys())) {
+      restorePromises.push(this._restoreEntityState(entityId));
+    }
+    await Promise.allSettled(restorePromises);
     this._identifyOpen = false;
     this._identifyEntityId = "";
     this._identifySelected = new Set();
@@ -3222,27 +3424,54 @@ export class HaInsightsCard extends LitElement {
             ${totalCount > 1
               ? html`
                   <div class="identify-hint">
-                    Uncheck entities as you find them — the remaining
-                    checked ones keep firing every 5s.
+                    ${this._identifyOneAtATime
+                      ? html`
+                          <strong>Click a row to start identifying it.</strong>
+                          Click again (or another row) to switch. Restored
+                          to pre-identify state on stop — so Circadian
+                          Lighting and auto-off automations don't kick in
+                          mid-search.
+                        `
+                      : html`
+                          <strong>All-at-once mode:</strong> tick rows to
+                          add them, untick to drop. State is restored on
+                          every drop.
+                        `}
                   </div>
+                  <label class="identify-mode-toggle">
+                    <input
+                      type="checkbox"
+                      ?checked=${!this._identifyOneAtATime}
+                      @change=${() => this._toggleIdentifyMode()}
+                    />
+                    <span>Fire all simultaneously (advanced)</span>
+                  </label>
                   <div class="identify-entity-list">
-                    ${this._identifyAllEntities.map((eid) => html`
-                      <label class="identify-entity-row">
-                        <input
-                          type="checkbox"
-                          ?checked=${this._identifySelected.has(eid)}
-                          @change=${() => this._toggleIdentifyEntity(eid)}
-                        />
-                        <span>${eid}</span>
-                      </label>
-                    `)}
+                    ${this._identifyAllEntities.map((eid) => {
+                      const active = this._identifySelected.has(eid);
+                      const inputType = this._identifyOneAtATime
+                        ? "radio"
+                        : "checkbox";
+                      return html`
+                        <label class="identify-entity-row ${active ? "active" : ""}">
+                          <input
+                            type="${inputType}"
+                            name="identify-target"
+                            ?checked=${active}
+                            @change=${() => this._toggleIdentifyEntity(eid)}
+                          />
+                          <span>${eid}</span>
+                        </label>
+                      `;
+                    })}
                   </div>
                 `
               : html`
                   <div class="identify-hint">
                     The identifier fires every 5 seconds — look or
-                    listen for the flash / chime / beep. Click
-                    "Found it!" when you've spotted the device.
+                    listen for the flash / chime / beep. The entity's
+                    pre-identify state (brightness / color / on-off) is
+                    restored when you click "Found it!" or "Stop".
                   </div>
                 `}
           </div>
