@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.10.13] — 2026-05-19
+
+### Added — 💬 Ask AI to write an automation (panel header button)
+
+Card UI for the integration v1.13.2 `chat_create_automation` WS
+endpoint. Closes the AI Agent HA competitive demo using the
+existing Refine plumbing.
+
+**Flow:**
+
+1. Click 💬 button in the panel header
+2. Modal opens with a textarea (max 2000 chars)
+3. Type a request — e.g. *"turn on porch light at sunset"* or
+   *"send me a notification when the basement door stays open more
+   than 5 minutes"*
+4. Click Generate → calls `home_insights/chat_create_automation`
+5. Modal switches to result view: rationale text + formatted YAML
+   preview + Apply / Edit prompt buttons
+6. Apply → calls `home_insights/apply` with the generated payload
+   as `payload_override` (re-uses existing apply machinery)
+7. Toast confirms; user finds the automation in Settings →
+   Automations
+
+**Privacy:** same redactor + audit log as Refine. The hint text
+in the modal calls this out so users know what leaves the network.
+
+**Errors render inline** beneath the textarea so the user can
+read the LLM's complaint, edit the prompt, and retry without
+losing context.
+
+**v1.13.4** will pre-populate `related_insight_ids` from the
+visible panel insight list so prompts like "make me an automation
+for that 6 PM porch-light pattern you noticed" produce YAML
+grounded in real observed behaviour rather than pure LLM
+guesswork. This release is the MVP — textarea + submit only.
+
 ## [1.10.12] — 2026-05-18
 
 ### Added — Vendor-native identify primitives
