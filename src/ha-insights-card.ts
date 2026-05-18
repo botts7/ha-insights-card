@@ -122,8 +122,31 @@ export class HaInsightsCard extends LitElement {
   /** v1.10.4: in-flight flag for the 🔆 Identify-this-entity button in
    *  the detail-dialog. Used to disable the button while the WS round-
    *  trip is in progress. Single boolean (not per-insight) because only
-   *  one identify can fire at a time per dialog. */
+   *  one identify can fire at a time per dialog.
+   *
+   *  v1.10.7 — superseded by the looping modal below. Kept here so any
+   *  legacy callers don't error. */
   @state() private _identifyBusy = false;
+  /** v1.10.7: looping-identify modal state. Pre-v1.10.7 the Identify
+   *  button fired once and showed a toast — many devices flash too
+   *  quickly to find, and the toast disappeared while users were
+   *  still searching. v1.10.7 wraps the action in a modal that fires
+   *  the identifier every IDENTIFY_INTERVAL_MS until the user clicks
+   *  "Found it!" or "Stop". */
+  @state() private _identifyOpen = false;
+  @state() private _identifyEntityId = "";
+  @state() private _identifyMethod = "";
+  @state() private _identifyCount = 0;
+  @state() private _identifyError = "";
+  /** v1.10.7: Set of entity_ids currently being identified. Cohort or
+   *  multi-entity insights (lagged_correlation pairs,
+   *  physical_device_link pairs, cohort_members lists) surface every
+   *  referenced entity as a checkbox in the modal — user toggles them
+   *  off as they find each physical device. The recurring timer fires
+   *  identify on every entity still in this set. */
+  @state() private _identifySelected: Set<string> = new Set();
+  @state() private _identifyAllEntities: string[] = [];
+  private _identifyTimer: ReturnType<typeof setInterval> | null = null;
   /** v1.10.6: BLE live-find state. Populated when user clicks the
    *  📡 BLE find button in the insight detail-dialog. Subscription
    *  delivers per-scanner RSSI updates; modal shows latest reading +
@@ -775,6 +798,58 @@ export class HaInsightsCard extends LitElement {
       flex-direction: column;
       overflow: hidden;
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+    /* v1.10.7: looping-identify modal */
+    .identify-dialog { max-width: 520px; }
+    .identify-status {
+      text-align: center;
+      padding: 16px 0;
+    }
+    .identify-counter {
+      font-size: 1.6em;
+      font-weight: 600;
+      color: var(--primary-text-color);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .identify-method {
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+      margin-top: 4px;
+    }
+    .identify-error {
+      background: rgba(239, 108, 0, 0.1);
+      color: var(--warning-color, #ef6c00);
+      padding: 8px 10px;
+      border-radius: 4px;
+      margin-top: 8px;
+      font-size: 0.85em;
+      white-space: pre-wrap;
+      text-align: left;
+    }
+    .identify-hint {
+      font-size: 0.9em;
+      color: var(--secondary-text-color);
+      margin: 8px 0 12px 0;
+    }
+    .identify-entity-list {
+      max-height: 240px;
+      overflow-y: auto;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
+      border-radius: 6px;
+      padding: 6px;
+    }
+    .identify-entity-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      cursor: pointer;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.9em;
+    }
+    .identify-entity-row:hover {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
     }
     /* v1.10.6: BLE find modal — narrow + tall, centered RSSI readout */
     .ble-find-dialog { max-width: 480px; }
@@ -2868,47 +2943,144 @@ export class HaInsightsCard extends LitElement {
     return null;
   }
 
-  /** v1.10.4: fire the entity's native identifier (light flash, speaker
-   *  chime, fan flicker, etc.) so the user can verify which physical
-   *  device corresponds to this insight's entity_id.
+  /** Collect EVERY entity_id referenced by this insight. Includes the
+   *  primary entity, any peer/leader/follower from the fingerprint, AND
+   *  cohort_members for cohort insights. De-duplicated, sorted for
+   *  stable display order. */
+  private _allReferencedEntities(insight: Insight): string[] {
+    const seen = new Set<string>();
+    const fp = insight.fingerprint as Record<string, unknown> | undefined;
+    if (fp) {
+      for (const k of [
+        "entity_id",
+        "leader_entity_id",
+        "follower_entity_id",
+        "target_entity_id",
+        "peer_entity_id",
+      ]) {
+        const v = fp[k];
+        if (typeof v === "string" && v.includes(".")) seen.add(v);
+      }
+    }
+    for (const m of insight.cohort_members ?? []) {
+      if (typeof m === "string" && m.includes(".")) seen.add(m);
+    }
+    return Array.from(seen).sort();
+  }
+
+  /** v1.10.7: open the looping-identify modal for an insight.
    *
-   *  Calls `home_insights/identify_entity` directly (no pre-capability
-   *  check — the backend already gates on capability and returns a
-   *  descriptive error when unsupported). Toast surfaces the result so
-   *  the user sees BOTH success ("Identifier fired — look/listen for
-   *  it") and graceful "this entity doesn't support identify" failures.
+   *  Pre-v1.10.7 we fired the identifier once and showed a toast — but
+   *  many devices flash too quickly to spot, the toast disappeared
+   *  while users were still searching, and multi-entity insights
+   *  (cohorts, lagged-correlation pairs, physical-device-link pairs)
+   *  only identified one of the entities.
    *
-   *  Pre-v1.10.4 this functionality was ONLY accessible via the bulk-
-   *  area-assign dialog, which most users never opened. Closes the
-   *  "we built it but you can't find it" UX gap flagged in the audit. */
+   *  v1.10.7 flow:
+   *    1. Open a modal listing EVERY referenced entity with a checkbox
+   *    2. Fire identify on all checked entities immediately
+   *    3. Re-fire every 5 seconds (Find My iPhone style)
+   *    4. User unchecks entities as they find each physical device
+   *    5. Click "Found it!" or "Stop" → tear down + close
+   *    6. Counter increments per cycle so user knows it's still running
+   */
   private async _identifyEntity(insight: Insight): Promise<void> {
     if (!this.hass) return;
-    const entityId = this._primaryEntityId(insight);
-    if (entityId === null) {
+    const entities = this._allReferencedEntities(insight);
+    if (entities.length === 0) {
       this._failModal(
-        "No single entity_id on this insight — try clicking Identify on a row "
-        + "from the bulk-area-assign dialog instead.",
+        "No identifiable entities in this insight's fingerprint.",
       );
       return;
     }
-    this._identifyBusy = true;
-    try {
-      const result = await this.hass.connection.sendMessagePromise<{
-        method?: string;
-        message?: string;
-      }>({
-        type: "home_insights/identify_entity",
-        entity_id: entityId,
-      });
-      const method = result.method ?? "identify";
-      this._toast =
-        `🔆 ${entityId} — fired ${method}. Look / listen for the device.`;
-    } catch (err) {
-      this._failModal(
-        `Identify failed: ${this._asMessage(err)}`,
-      );
-    } finally {
-      this._identifyBusy = false;
+    this._identifyAllEntities = entities;
+    this._identifySelected = new Set(entities);  // all checked by default
+    this._identifyEntityId = entities[0];        // legacy single-entity field
+    this._identifyMethod = "";
+    this._identifyCount = 0;
+    this._identifyError = "";
+    this._identifyOpen = true;
+    // Fire immediately so the user sees instant feedback, then schedule
+    // the recurring fire.
+    await this._fireIdentifyOnce();
+    if (this._identifyTimer != null) clearInterval(this._identifyTimer);
+    this._identifyTimer = setInterval(() => {
+      void this._fireIdentifyOnce();
+    }, 5000);
+  }
+
+  /** Fire the identifier ONCE. Used by both the initial click and the
+   *  recurring timer. Increments _identifyCount on success, sets
+   *  _identifyError on failure (which stops the loop). */
+  private async _fireIdentifyOnce(): Promise<void> {
+    if (!this.hass || this._identifySelected.size === 0) return;
+    // Fire identify on every CHECKED entity in parallel. Errors on
+    // individual entities accumulate into _identifyError but don't
+    // stop the loop — the other entities may still be identifying
+    // successfully.
+    const entities = Array.from(this._identifySelected);
+    const results = await Promise.allSettled(
+      entities.map((entityId) =>
+        this.hass!.connection.sendMessagePromise<{
+          method?: string;
+          message?: string;
+        }>({
+          type: "home_insights/identify_entity",
+          entity_id: entityId,
+        }),
+      ),
+    );
+    const errors: string[] = [];
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      if (r.status === "fulfilled") {
+        if (r.value.method) this._identifyMethod = r.value.method;
+      } else {
+        errors.push(`${entities[i]}: ${this._asMessage(r.reason)}`);
+      }
+    }
+    this._identifyError = errors.length ? errors.join("\n") : "";
+    this._identifyCount = this._identifyCount + 1;
+    // If EVERY entity errored, the loop is just generating noise.
+    // Stop it so the user can read the failure.
+    if (errors.length === results.length && this._identifyTimer != null) {
+      clearInterval(this._identifyTimer);
+      this._identifyTimer = null;
+    }
+  }
+
+  /** Toggle whether a specific entity is currently being identified.
+   *  Cohort + multi-entity insights surface every referenced entity
+   *  as a checkbox in the modal — user can deselect ones they've
+   *  already found to narrow down which device is which. */
+  private _toggleIdentifyEntity(entityId: string): void {
+    const next = new Set(this._identifySelected);
+    if (next.has(entityId)) {
+      next.delete(entityId);
+    } else {
+      next.add(entityId);
+    }
+    this._identifySelected = next;
+  }
+
+  /** Close the identify modal and clear the recurring timer. Called by
+   *  both "Found it!" and "Stop" — only difference is the toast text. */
+  private _stopIdentify(found: boolean): void {
+    if (this._identifyTimer != null) {
+      clearInterval(this._identifyTimer);
+      this._identifyTimer = null;
+    }
+    const entityCount = this._identifySelected.size;
+    this._identifyOpen = false;
+    this._identifyEntityId = "";
+    this._identifySelected = new Set();
+    this._identifyMethod = "";
+    this._identifyError = "";
+    this._identifyCount = 0;
+    if (found && entityCount > 0) {
+      this._toast = entityCount === 1
+        ? `✅ Found it!`
+        : `✅ Identification stopped (${entityCount} entities were active).`;
     }
   }
 
@@ -3008,6 +3180,89 @@ export class HaInsightsCard extends LitElement {
     if (rssi >= -70) return { label: "warm", color: "#f97316" };
     if (rssi >= -85) return { label: "cool", color: "#3b82f6" };
     return { label: "cold", color: "#6b7280" };
+  }
+
+  /** v1.10.7: render the looping-identify modal. Pre-v1.10.7 a single
+   *  call fired with a toast outside the dialog; users couldn't catch
+   *  the flash and the toast disappeared. New flow: a focused modal
+   *  with a checkbox list of every referenced entity, a fire counter,
+   *  and "Found it!" / "Stop" buttons. The recurring timer fires every
+   *  5 seconds until the user closes or unchecks all entities. */
+  private _renderIdentifyModal(): unknown {
+    if (!this._identifyOpen) return nothing;
+    const selectedCount = this._identifySelected.size;
+    const totalCount = this._identifyAllEntities.length;
+    const singleEntity = totalCount === 1;
+    return html`
+      <div class="dialog-backdrop" @click=${() => this._stopIdentify(false)}>
+        <div
+          class="dialog identify-dialog"
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="dialog-header">
+            <div class="dialog-title">
+              🔆 Identifying ${singleEntity ? this._identifyAllEntities[0] : `${selectedCount} of ${totalCount} entities`}
+            </div>
+            <button
+              class="dialog-close"
+              aria-label="Close"
+              @click=${() => this._stopIdentify(false)}
+            >×</button>
+          </div>
+          <div class="dialog-body">
+            <div class="identify-status">
+              <div class="identify-counter">Fired ${this._identifyCount} ${this._identifyCount === 1 ? "time" : "times"}</div>
+              ${this._identifyMethod
+                ? html`<div class="identify-method">method: ${this._identifyMethod}</div>`
+                : ""}
+              ${this._identifyError
+                ? html`<div class="identify-error">${this._identifyError}</div>`
+                : ""}
+            </div>
+            ${totalCount > 1
+              ? html`
+                  <div class="identify-hint">
+                    Uncheck entities as you find them — the remaining
+                    checked ones keep firing every 5s.
+                  </div>
+                  <div class="identify-entity-list">
+                    ${this._identifyAllEntities.map((eid) => html`
+                      <label class="identify-entity-row">
+                        <input
+                          type="checkbox"
+                          ?checked=${this._identifySelected.has(eid)}
+                          @change=${() => this._toggleIdentifyEntity(eid)}
+                        />
+                        <span>${eid}</span>
+                      </label>
+                    `)}
+                  </div>
+                `
+              : html`
+                  <div class="identify-hint">
+                    The identifier fires every 5 seconds — look or
+                    listen for the flash / chime / beep. Click
+                    "Found it!" when you've spotted the device.
+                  </div>
+                `}
+          </div>
+          <div class="dialog-footer">
+            <button
+              class="action primary"
+              @click=${() => this._stopIdentify(true)}
+            >
+              ✅ Found it!
+            </button>
+            <button
+              class="action"
+              @click=${() => this._stopIdentify(false)}
+            >
+              Stop
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   /** v1.10.6: render the BLE find modal — latest RSSI + trend arrow.
@@ -6267,11 +6522,10 @@ export class HaInsightsCard extends LitElement {
                     ${this._primaryEntityId(insight) !== null
                       ? html`<button
                           class="action"
-                          ?disabled=${this._identifyBusy}
-                          title="Fire the entity's native identifier (light flash, speaker chime, fan flicker, etc.) so you can confirm which physical device this insight refers to."
+                          title="Find My iPhone style: opens a modal that fires the entity's native identifier (light flash / chime / fan flicker) every 5 seconds until you click 'Found it!'. Multi-entity insights show every referenced entity as a checkbox so you can identify them one at a time."
                           @click=${() => this._identifyEntity(insight)}
                         >
-                          ${this._identifyBusy ? "identifying…" : "🔆 Identify entity"}
+                          🔆 Identify entity
                         </button>
                         <button
                           class="action"
@@ -6431,6 +6685,7 @@ export class HaInsightsCard extends LitElement {
       </ha-card>
       ${this._renderDialog()}
       ${this._renderBleFindModal()}
+      ${this._renderIdentifyModal()}
       ${this._renderRefineAutomationModal()}
       ${this._renderSuggestAddDialog()}
       <bulk-area-assign-dialog

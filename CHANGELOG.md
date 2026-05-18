@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.10.7] — 2026-05-18
+
+### Fixed — 🔆 Identify now loops + supports multi-entity insights
+
+Real-install report on v1.10.5: Identify fired once, showed a toast
+in the panel (NOT in the modal), and the toast disappeared before
+the user could find slow / quiet devices. Also: insights that
+reference multiple entities (cohort insights, lagged_correlation
+pairs, physical_device_link pairs like "same Hue bulb that is both
+a light AND a temperature sensor") only identified one entity.
+
+v1.10.7 fixes both:
+
+**Looping modal** — clicking 🔆 Identify entity now opens a focused
+modal that:
+- Lists every referenced entity as a checkbox (one row per entity)
+- Fires identify on all checked entities immediately
+- Re-fires every 5 seconds (Find My iPhone style)
+- Shows a fire-counter so the user knows it's still running
+- Surfaces per-entity errors (some entities may not support
+  identify; user can uncheck those rows to silence the error)
+- Stops cleanly when user clicks "Found it!" or "Stop"
+
+**Multi-entity support** — `_allReferencedEntities()` collects
+`entity_id`, `leader_entity_id`, `follower_entity_id`,
+`peer_entity_id`, `target_entity_id` AND `cohort_members`. User
+unchecks entities as they find each physical device.
+
+Three cases all work:
+- Single-entity insight (manual_habit) → 1 checkbox
+- Same device / multiple entities (physical_device_link: light + temp
+  sensor on the same bulb) → 2 checkboxes
+- Multiple devices in cohort (long_tail with 12 similar entities)
+  → 12 checkboxes
+
 ## [1.10.6] — 2026-05-18
 
 ### Added — 📡 BLE find button in insight detail dialog
