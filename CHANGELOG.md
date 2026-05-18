@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.10.6] — 2026-05-18
+
+### Added — 📡 BLE find button in insight detail dialog
+
+Companion to v1.10.5's 🔆 Identify button. For BLE-trackable entities
+(companion app's BLE scanner OR a Bluetooth proxy in any HA area), a
+📡 BLE find button now appears in the insight detail-dialog action
+row alongside Identify.
+
+Clicking it:
+
+1. Checks BLE capability via `home_insights/ble_capability`
+2. Subscribes to `home_insights/ble_live_find` for the entity's
+   Bluetooth address
+3. Opens a modal with a big RSSI readout, color bucket
+   (HOT/warm/cool/cold), trend arrow (↑↓→), and the scanner that
+   most-recently saw the device
+4. Walks the user through "wave your phone — the arrow gets you
+   closer (↑) or further (↓)"
+
+Unsubscribe is automatic on close.
+
+Mirrors the BLE-find UX from the bulk-area-assign dialog (Card
+v1.8.0/v1.10.0) but scoped to one insight at a time. Closes the
+last v1.12.16 audit gap for orphan-device/physical-device-link
+insights where users need to physically locate the device.
+
 ## [1.10.5] — 2026-05-18
 
 ### Added — 🔆 Identify entity button in insight detail dialog
