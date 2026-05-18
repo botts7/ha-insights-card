@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.10.10] — 2026-05-18
+
+### Added — Find Device now finds passive sensors and motion sensors
+
+The panel-level 🔍 Find Device modal previously only listed
+domains with native identify methods (`light` / `switch` /
+`media_player` / `siren`). v1.10.10 extends it to two new modes:
+
+**👆 Touch-test mode (sensor)**. Sensors with a perturbable
+`device_class` — temperature, humidity, carbon_dioxide,
+illuminance, sound_pressure, moisture — are now listed.
+Checking one captures a baseline of the current reading and
+subscribes to the live `state_changed` stream. Touch / breathe
+on / cover / cup-a-warm-hand-over the sensor; when the delta
+exceeds the per-class threshold (1 °C for temp, 5 %RH for
+humidity, 200 ppm for CO₂, 100 lx for illuminance, etc.) the
+row turns green and shows "✅ Spike detected — this is your
+sensor!"
+
+**👀 Watch mode (binary_sensor)**. motion / occupancy / presence /
+opening / door / window / vibration binary sensors are listed.
+Check one and the row shows the current state; walk past, open
+the door, wave at the sensor, and the row goes green when the
+state flips to `on`.
+
+Both modes are purely subscription-based — no services are
+fired against the entity, no risk of triggering. Drop-in
+replacement for "open Developer Tools, filter to the entity,
+watch the state" workflow most users do today.
+
+Modal sorts entities by mode (firable → touch-test →
+binary-sensor watch), then alphabetically inside group, so you
+can scan the list by interaction type. Existing safety
+machinery (5-min auto-stop, per-domain cadence, critical-load
+deny-list) is unchanged for the fire-mode entities; watch-mode
+entities have no aggregate-rate concerns because they don't
+emit anything.
+
 ## [1.10.9] — 2026-05-18
 
 ### Fixed — Identify modal restores state + defaults to 1-at-a-time
