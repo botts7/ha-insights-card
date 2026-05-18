@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.10.5] — 2026-05-18
+
+### Added — 🔆 Identify entity button in insight detail dialog
+
+Contextual entity actions were previously only accessible via the
+bulk-area-assign dialog. That meant users could see e.g. an
+`orphan_device` insight referencing `light.sometihng_unknown_3` and
+have no easy way to figure out which physical device it pointed at.
+
+v1.10.5 adds a 🔆 Identify entity button to the detail-dialog action
+row. The button:
+
+- Appears for every insight whose fingerprint pins a single
+  primary entity (entity_id / leader_entity_id / follower_entity_id
+  / target_entity_id).
+- Calls `home_insights/identify_entity` directly — the backend
+  picks the appropriate identifier (light flash, speaker chime,
+  fan flicker) based on the entity's capabilities.
+- Toasts the result so users see both successful firings ("look /
+  listen for the device") AND graceful "this entity doesn't
+  support identify" failures.
+
+Closes the largest "we built it but you can't find it" gap from the
+v1.12.16 UX audit. Future v1.10.6+ will add equivalent contextual
+buttons for 📡 BLE find and 👆 Perturbation test.
+
 ## [1.10.4] — 2026-05-18
 
 ### Added — 🔬 Diagnostics button in panel header
