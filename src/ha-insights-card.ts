@@ -559,6 +559,18 @@ export class HaInsightsCard extends LitElement {
     .coupling-badge:hover {
       opacity: 1.0;
     }
+    /* v1.12.11: "newly added" badge. Sky-blue background to read as
+       informational, not warning — the entity isn't broken, just new. */
+    .entity-age-badge {
+      cursor: help;
+      background: var(--info-color, #4a90e2);
+      color: var(--text-primary-color, #fff);
+      border-color: var(--info-color, #4a90e2);
+      opacity: 0.80;
+    }
+    .entity-age-badge:hover {
+      opacity: 1.0;
+    }
     .pill-action:hover {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.06));
     }
@@ -3688,6 +3700,7 @@ export class HaInsightsCard extends LitElement {
           ${this._displayTitle(insight)}
           ${this._renderCouplingBadge(insight)}
           ${this._renderDirectionalityBadge(insight)}
+          ${this._renderEntityAgeBadge(insight)}
           ${hasCohort
             ? html` <button
                 class="pill-action"
@@ -4151,6 +4164,40 @@ export class HaInsightsCard extends LitElement {
       aria-label="${tooltip}"
       title="${tooltip}"
     >🔗 coupled</span>`;
+  }
+
+  /** v1.12.11: 🆕 badge for insights whose primary entity was added to
+   *  HA within the last NEWLY_ADDED_THRESHOLD_DAYS (14) days.
+   *
+   *  Surfaces the dataset-window limit so users know why a brand-new
+   *  entity's insight may look noisy or hedged — there literally isn't
+   *  enough history yet. Detectors like state_shift already gate
+   *  internally; this badge is the visible explanation.
+   *
+   *  Server attaches `entity_age_days` only when within threshold, so
+   *  absence == "not newly added" (or pre-HA-2024.10 registry without
+   *  created_at, in which case we can't tell). Either way, no badge.
+   */
+  private _renderEntityAgeBadge(insight: Insight): unknown {
+    const age = insight.entity_age_days;
+    if (typeof age !== "number") return nothing;
+    let label: string;
+    if (age === 0) label = "added today";
+    else if (age === 1) label = "added yesterday";
+    else label = `added ${age} days ago`;
+    const tooltip = (
+      `This entity was ${label.replace("added ", "")} `
+      + "in Home Assistant. Detectors have limited history to work "
+      + "from, so any pattern, anomaly, or shift may not be reliable "
+      + "yet — give it a couple of weeks before acting on it."
+    );
+    return html`<span
+      class="pill-action entity-age-badge"
+      style="margin-left:6px;"
+      role="img"
+      aria-label="${tooltip}"
+      title="${tooltip}"
+    >🆕 ${label}</span>`;
   }
 
   /** v1.7.7: render the "Managed devices" section in the detail dialog.
@@ -5791,6 +5838,7 @@ export class HaInsightsCard extends LitElement {
               ${this._displayTitle(insight)}
               ${this._renderCouplingBadge(insight)}
               ${this._renderDirectionalityBadge(insight)}
+              ${this._renderEntityAgeBadge(insight)}
             </div>
             <button
               class="dialog-close"
