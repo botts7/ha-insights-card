@@ -29,6 +29,22 @@ behaviour for power users.
 Active row gets a warning-color highlight + left border so the user
 always knows what's firing.
 
+### Fixed — Find Device modal hides un-identifiable domains
+
+Real-install report: the 🔍 Find Device modal was listing every
+entity in the install — including `automation.*`, `scene.*`,
+`script.*`, `sensor.*`, `binary_sensor.*`, `calendar.*`, etc. The
+backend `lib/identify_capability.py` returns NONE for all of those,
+so checking the box silently failed and frustrated the user.
+
+Filter at the source. Only entities whose domain has a real native
+identifier are listed: `light`, `switch`, `media_player`, `siren`.
+Modal hint reflects the filter and points users to the existing
+👆 Touch test (for perturbable sensors — temperature, humidity, CO₂,
+illuminance, sound, moisture) and "walk and watch" for motion /
+occupancy binary_sensors. Domain whitelist must stay aligned with
+backend `identify_capability_for`.
+
 ## [1.10.8] — 2026-05-18
 
 ### Added — 🔍 "Find My HA Device" in panel header

@@ -9160,6 +9160,18 @@ if (!window.customCards.some((c) => c.type === "ha-insights-card")) {
 // bundle. Always current with the integration's panel.js, regardless
 // of what HACS has done with the dashboard card.
 const PANEL_CARD_TAG = "ha-insights-card-bundled";
+/** Domains whose entities can be physically identified — must stay
+ *  aligned with `lib/identify_capability.py::identify_capability_for`.
+ *  Listing software-only domains (automation, scene, script, calendar,
+ *  sensor, etc.) in the Find-Device modal frustrates the user because
+ *  the backend returns NONE and the loop reports "no identify method
+ *  available". Filter at the source instead. */
+const FINDABLE_DOMAINS = new Set([
+    "light",
+    "switch",
+    "media_player",
+    "siren",
+]);
 if (!customElements.get(PANEL_CARD_TAG)) {
     customElements.define(PANEL_CARD_TAG, class extends HaInsightsCard {
     });
@@ -10400,14 +10412,24 @@ class HaInsightsPanel extends i {
     }
     /** Filter the entity list to entries matching the user's search
      *  string. Case-insensitive substring match on entity_id +
-     *  friendly_name + domain. Capped at 100 results so the DOM stays
-     *  responsive on installs with thousands of entities. */
+     *  friendly_name. Capped at 100 results so the DOM stays
+     *  responsive on installs with thousands of entities.
+     *
+     *  Only physically-findable domains are returned — automation,
+     *  scene, script, sensor, calendar, etc. are software constructs
+     *  with no identify signal (`lib/identify_capability.py` returns
+     *  NONE for them), so listing them in the modal just frustrates
+     *  the user. Domain list must stay aligned with the backend's
+     *  `identify_capability_for` whitelist. */
     _findDeviceMatches() {
         if (!this.hass?.states)
             return [];
         const needle = this._findDeviceSearch.trim().toLowerCase();
         const out = [];
         for (const [entity_id, state] of Object.entries(this.hass.states)) {
+            const domain = entity_id.split(".", 1)[0];
+            if (!FINDABLE_DOMAINS.has(domain))
+                continue;
             const friendly = state.attributes?.friendly_name ?? entity_id;
             if (!needle) {
                 out.push({ entity_id, friendly_name: friendly });
@@ -10809,11 +10831,22 @@ class HaInsightsPanel extends i {
           </div>
           <div class="diagnostics-body">
             <p class="diagnostics-hint">
-              Pick any entity below — the integration fires its native
-              identifier (light flash, speaker chime, fan flicker)
-              every 5 seconds until you uncheck it. Check several to
-              identify them all at once. Loop starts the moment you
-              check the first one.
+              Only entities with a built-in identifier are listed:
+              lights (flash / strobe), switches (toggle click), media
+              players (chime), sirens (chirp). Automations, scenes,
+              and scripts are software constructs — they have no
+              physical body to find. Pick any entity below and the
+              integration fires its native identifier every 5 seconds
+              until you uncheck it.
+            </p>
+            <p class="diagnostics-hint" style="color: var(--secondary-text-color); font-size: 0.85em;">
+              💡 To find a passive sensor (temperature, humidity, CO₂,
+              illuminance, sound, moisture), open the insight where it
+              appears and use the <strong>👆 Touch test</strong> button —
+              touch the sensor and the integration tells you which
+              entity actually spiked. For motion / occupancy sensors,
+              walk through each room and watch the live state for the
+              one that fires.
             </p>
             <input
               type="search"
