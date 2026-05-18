@@ -45,6 +45,50 @@ illuminance, sound, moisture) and "walk and watch" for motion /
 occupancy binary_sensors. Domain whitelist must stay aligned with
 backend `identify_capability_for`.
 
+### Fixed — Vendor-pairing-mode safety + critical-load gate + session ceilings
+
+Three concurrent safety fixes for the identify pipeline:
+
+**Vendor pairing-mode safe patterns.** Pre-v1.10.9 strobe fired 5
+toggles in 1.4 s — that crossed the factory-reset threshold of
+**every** major bulb vendor (Tuya 3×, Aqara 5×, Hue 5×, IKEA 6×,
+Sengled 10×, LIFX 5×). Running identify on a Tuya bulb would have
+factory-reset it mid-search. New ordering:
+
+  1. `FLASH_LIGHT` — native driver flash (no power cycle)
+  2. `BRIGHTNESS_WIGGLE` — dim → bright → dim → bright, **no off
+     transitions**, safe for every vendor (NEW)
+  3. `STROBE_LIGHT` — 2-toggle 3 s cadence, last resort
+
+Switches reduced from 3 toggles at 500 ms → 2 toggles at 2.5 s
+(stays under Tuya's 3-in-10 s threshold). Per-domain loop cadence:
+lights 5 s, media 6 s, siren 10 s, switch 12 s — aggregate stays
+"human-paced", not robotic.
+
+**Critical-load deny-list.** `lib/critical_load_keywords.py` refuses
+toggle on entities whose name matches medical, HA-host, network
+infra, refrigeration, EV charger, pumps, safety / security, or
+solar / battery keywords. Critically: keywords like
+`homeassistant`, `hass`, `proxmox`, `synology`, `raspberry_pi`
+prevent the worst-case "user toggles the switch that powers HA
+itself and the session terminates mid-identify."
+
+**Power-cycle confirmation.** Methods that interrupt power
+(`STROBE_LIGHT`, `SWITCH_TOGGLE`, `SIREN_CHIRP`) now require
+explicit `confirm_power_cycle=true` in the WS request. The card
+shows a `window.confirm()` dialog the first time an entity is
+checked, with the device-class-specific warning. Once confirmed
+for the session, subsequent fires proceed without re-prompting.
+
+**Session ceilings.** Auto-stop after 5 min wall-clock; cap each
+entity at 30 fires. Per-entity counter shown in the row footer
+alongside the per-session countdown.
+
+See `docs/device_identify_quirks.md` for the full vendor table
+and the v1.10.10–13 backlog (sensor touch-test integration,
+device-graph LED alternatives, vendor-native primitives,
+power-consumption gate).
+
 ## [1.10.8] — 2026-05-18
 
 ### Added — 🔍 "Find My HA Device" in panel header
