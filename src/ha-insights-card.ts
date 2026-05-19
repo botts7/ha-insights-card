@@ -772,6 +772,13 @@ export class HaInsightsCard extends LitElement {
     button.action:hover:not(:disabled) {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
     }
+    /* v1.10.15 — a11y: visible keyboard focus on every action button.
+       Desktop bulk-triage users rely on Tab/Shift+Tab; without a ring
+       you genuinely can't tell which button has focus. */
+    button.action:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
+    }
     button.action:disabled {
       opacity: 0.5;
       cursor: not-allowed;
