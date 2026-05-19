@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.10.14] — 2026-05-19
+
+### Fixed — diagnostics "Copy to clipboard" failed in some HA panels
+
+Toast read `Clipboard copy failed: Cannot read properties of undefined`
+on installs where `navigator.clipboard` is unavailable: non-HTTPS
+local-network HA, iframe panels without `clipboard-write` permission,
+some older browsers. The previous code called
+`navigator.clipboard.writeText(...)` unconditionally, which throws
+TypeError before the promise can await.
+
+Fix: feature-detect `navigator.clipboard?.writeText`; fall back to
+the legacy textarea + `document.execCommand('copy')` pattern when
+the modern API is missing. The textarea is positioned off-screen
+(`position: fixed`, `left: -9999px`) rather than `display: none`
+because Safari refuses to select hidden elements.
+
 ## [1.10.13] — 2026-05-19
 
 ### Added — 💬 Ask AI to write an automation (panel header button)
