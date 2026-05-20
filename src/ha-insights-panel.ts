@@ -214,6 +214,11 @@ export class HaInsightsPanel extends LitElement {
   // protocol (~600 token rules) for tricky cases. Persists across
   // page loads. Passed through the embedded card config.
   @state() private _auditDepth: "concise" | "indepth" = "concise";
+  // v1.10.16: how many extra batches of 200 insights to render beyond
+  // the default cap. Bumped on "Load more" button click in the card's
+  // truncation footer. Reset to 0 whenever filters / search / sort
+  // change so the user doesn't keep paginating through a stale set.
+  @state() private _paginationStep = 0;
   // Total insight count BEFORE chip filters. The card returns the
   // post-filter count via a property; we maintain the pre-filter count
   // here for the "Showing X of Y" hint in the panel header.
@@ -317,12 +322,29 @@ export class HaInsightsPanel extends LitElement {
       position: sticky;
       top: 0;
       z-index: 4;
+      /* v1.10.16: stack rows vertically. Previous layout had titles and
+         action-buttons as siblings in a single flex row, which on
+         busy installs (many action buttons + many detector chips)
+         squeezed the titles column narrow, forcing detector-chips to
+         wrap one-per-line and inflating the header height enough to
+         leave a huge blank gap above the insights. */
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .header-row {
       display: flex;
       align-items: flex-start;
       gap: 16px;
+      /* Let the action-buttons row wrap onto a second line when there
+         are too many to fit (Backfill / Run audit rollup / Scan now /
+         Reload UI / Purge all / Diagnostics / Find device / Ask AI all
+         visible at once overflows narrow viewports). */
+      flex-wrap: wrap;
     }
     .header .titles {
-      flex: 1;
+      flex: 1 1 320px;
+      min-width: 0;
     }
     .header h1 {
       margin: 0 0 4px;
@@ -336,7 +358,9 @@ export class HaInsightsPanel extends LitElement {
     .header .actions {
       display: flex;
       gap: 8px;
-      flex-shrink: 0;
+      /* v1.10.16: wrap inside the actions row so buttons aren't
+         clipped at the right edge of the viewport. */
+      flex-wrap: wrap;
     }
     .header button.action {
       display: inline-flex;
@@ -741,7 +765,10 @@ export class HaInsightsPanel extends LitElement {
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
-      margin-top: 8px;
+      /* v1.10.16: chips now live in their own row below the header
+         row, so the available width is the full viewport — wrapping
+         is graceful 2-3 lines instead of one-chip-per-line. */
+      margin-top: 0;
     }
     .detector-chip {
       display: inline-flex;
@@ -1124,9 +1151,12 @@ export class HaInsightsPanel extends LitElement {
       `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}|` +
       `${this._filterLabels.join(",")}|` +
       `${this._hideAlreadyAutomated ? "1" : "0"}|` +
-      `${this._auditDepth}`;
+      `${this._auditDepth}|p${this._paginationStep}`;
     if (this._cachedCardConfigKey !== key) {
       this._cachedCardConfigKey = key;
+      // v1.10.16: filters / sort / search changed — reset pagination
+      // so the user doesn't keep paginating through a stale set.
+      this._paginationStep = 0;
       this._cachedCardConfig = {
         type: "custom:ha-insights-card",
         title: this._search ? `Insights matching "${this._search}"` : "All insights",
@@ -1134,7 +1164,10 @@ export class HaInsightsPanel extends LitElement {
         // browser locks up rendering all of them; if a user really has
         // 1000+ they should use search/filter to narrow first. The card
         // shows a "showing N of M" hint when the list is truncated.
-        max_rows: 200,
+        // v1.10.16: pagination — cap doubles on each "Load more" click
+        // (200 → 400 → 600 → …). Filter/sort/search changes reset to 200.
+        max_rows: 200 + this._paginationStep * 200,
+        paginate: true,
         min_confidence: this._minConfidence,
         search: this._search,
         sort_by: this._sortBy,
@@ -2296,14 +2329,14 @@ export class HaInsightsPanel extends LitElement {
   protected render(): TemplateResult {
     return html`
       <div class="header">
-        <div class="titles">
-          <h1>HA Insights</h1>
-          <div class="sub">
-            Patterns the integration noticed in your home — apply, refine, test, or dismiss each.
+        <div class="header-row">
+          <div class="titles">
+            <h1>HA Insights</h1>
+            <div class="sub">
+              Patterns the integration noticed in your home — apply, refine, test, or dismiss each.
+            </div>
           </div>
-          ${this._renderDetectorCounts()}
-        </div>
-        <div class="actions">
+          <div class="actions">
           <button
             class="action"
             ?disabled=${this._backfillBusy}
@@ -2412,6 +2445,8 @@ export class HaInsightsPanel extends LitElement {
               : html`<ha-icon icon="mdi:check-all"></ha-icon> Apply all visible`}
           </button>
         </div>
+        </div>
+        ${this._renderDetectorCounts()}
       </div>
       ${this._renderRollupProgress()}
       <div class="filters">
@@ -3185,9 +3220,18 @@ export class HaInsightsPanel extends LitElement {
       <ha-insights-card-bundled
         .hass=${this.hass as unknown}
         .config=${this._embeddedCardConfig as unknown}
+        @ha-insights-card-load-more=${this._onLoadMore}
       ></ha-insights-card-bundled>
     `;
   }
+
+  /** v1.10.16 — fired by the card's truncation footer when paginate=true.
+   *  Bumps the cap by 200 (cap = 200 * (1 + step)). _embeddedCardConfig
+   *  recomputes the next time it's read because _paginationStep is in
+   *  the cache key. */
+  private _onLoadMore = (): void => {
+    this._paginationStep += 1;
+  };
 }
 
 // Guard against double-registration — only relevant if a future Lovelace

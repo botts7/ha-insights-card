@@ -6041,10 +6041,19 @@ export class HaInsightsCard extends LitElement {
    */
   private _hasSpecializedCardRenderer(insight: Insight): boolean {
     const payload = (insight.payload ?? {}) as Record<string, unknown>;
+    const kind = payload.kind as string | undefined;
     return !!(
       payload._state_shift ||
       payload._physical_device_link ||
-      payload._location_proposal
+      payload._location_proposal ||
+      payload._wifi_find ||
+      // v1.10.16 — v1.14.x detectors dispatch by `kind` instead of
+      // payload._key. Without these branches users saw the raw JSON
+      // dump (reported 2026-05-20 on Kogan92 unavailable_device_fixit).
+      kind === "unavailable_device_fixit" ||
+      kind === "reboot_loop" ||
+      kind === "hardware_suggestion" ||
+      kind === "stale_automation"
     );
   }
 
@@ -6068,7 +6077,272 @@ export class HaInsightsCard extends LitElement {
         payload._location_proposal as Record<string, unknown>,
       );
     }
+    if (payload._wifi_find) {
+      return this._renderWifiFindBody(
+        insight,
+        payload._wifi_find as Record<string, unknown>,
+      );
+    }
+    const kind = payload.kind as string | undefined;
+    if (kind === "unavailable_device_fixit") {
+      return this._renderUnavailableDeviceFixItBody(insight, payload);
+    }
+    if (kind === "reboot_loop") {
+      return this._renderRebootLoopBody(insight, payload);
+    }
+    if (kind === "hardware_suggestion") {
+      return this._renderHardwareSuggestionBody(insight, payload);
+    }
+    if (kind === "stale_automation") {
+      return this._renderStaleAutomationBody(insight, payload);
+    }
     return nothing;
+  }
+
+  /** v1.10.16 — generic "fix it" body shared by unavailable_device_fixit,
+   *  reboot_loop and other v1.14.x kinds. They emit similar payload
+   *  fields (deeplink + suggested_actions + observations); share the
+   *  rendering primitives instead of duplicating them four times. */
+  private _renderFixItBlock(
+    payload: Record<string, unknown>,
+  ): TemplateResult {
+    const deeplinkUrl = payload.deeplink_url as string | undefined;
+    const deeplinkLabel = payload.deeplink_label as string | undefined;
+    const suggestedActions = (payload.suggested_actions as string[] | undefined) ?? [];
+    return html`
+      ${deeplinkUrl
+        ? html`<a class="action primary" href=${deeplinkUrl} target="_top"
+            style="text-decoration: none; display: inline-block;
+                   margin-top: 12px; padding: 8px 14px;">
+            ${deeplinkLabel ?? "Open integration"} →
+          </a>`
+        : nothing}
+      ${suggestedActions.length
+        ? html`<div style="margin-top: 14px;">
+            <strong>Try these in order:</strong>
+            <ol style="margin: 8px 0 0 0; padding-left: 22px;
+                       line-height: 1.45;">
+              ${suggestedActions.map(
+                (a) => html`<li style="margin-bottom: 6px;">${a}</li>`,
+              )}
+            </ol>
+          </div>`
+        : nothing}
+    `;
+  }
+
+  /** v1.10.16 — UnavailableDeviceFixItDetector (v1.14.0) */
+  private _renderUnavailableDeviceFixItBody(
+    insight: Insight,
+    payload: Record<string, unknown>,
+  ): TemplateResult {
+    const confidencePct = Math.round(insight.confidence * 100);
+    const hours = payload.hours_unavailable as number | undefined;
+    const friendly =
+      (payload.friendly_name as string | undefined) ??
+      (payload.entity_id as string | undefined) ??
+      "?";
+    const integration = (payload.integration as string | undefined) ?? "—";
+    const currentState =
+      (payload.current_state as string | undefined) ?? "unavailable";
+    const durationLabel =
+      hours == null
+        ? "—"
+        : hours < 48
+          ? `${hours} hours`
+          : `${Math.round(hours / 24)} days`;
+    return html`
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill" style="background: rgba(244, 67, 54, 0.15);
+                                    color: var(--error-color, #c62828);">
+            ${currentState}
+          </span>
+        </div>
+        <h4 style="margin: 6px 0 0 0;">${friendly}</h4>
+        <div style="color: var(--secondary-text-color); font-size: 0.95em;
+                    margin-top: 4px;">
+          Stuck unavailable for <strong>${durationLabel}</strong> ·
+          integration: <code>${integration}</code>
+        </div>
+        ${insight.explanation
+          ? html`<div class="explanation" style="margin-top: 10px;">
+              ${insight.explanation}
+            </div>`
+          : nothing}
+        ${this._renderFixItBlock(payload)}
+      </div>
+    `;
+  }
+
+  /** v1.10.16 — RebootLoopDetector (v1.14.1) */
+  private _renderRebootLoopBody(
+    insight: Insight,
+    payload: Record<string, unknown>,
+  ): TemplateResult {
+    const confidencePct = Math.round(insight.confidence * 100);
+    const friendly =
+      (payload.friendly_name as string | undefined) ??
+      (payload.entity_id as string | undefined) ??
+      "?";
+    const flipsCount = payload.flips_count as number | undefined;
+    const lookbackDays = payload.lookback_days as number | undefined;
+    const gapHuman =
+      (payload.median_gap_human as string | undefined) ?? "—";
+    const cv = payload.cv as number | undefined;
+    const integration = (payload.integration as string | undefined) ?? "—";
+    return html`
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">reboot loop</span>
+        </div>
+        <h4 style="margin: 6px 0 0 0;">${friendly}</h4>
+        <div style="color: var(--secondary-text-color); font-size: 0.95em;
+                    margin-top: 4px;">
+          ${flipsCount ?? "?"} availability flips in
+          ${lookbackDays ?? "?"} d · median gap
+          <strong>${gapHuman}</strong>
+          ${cv != null ? html` · CV ${cv.toFixed(2)}` : nothing}
+          · integration: <code>${integration}</code>
+        </div>
+        ${insight.explanation
+          ? html`<div class="explanation" style="margin-top: 10px;">
+              ${insight.explanation}
+            </div>`
+          : nothing}
+        ${this._renderFixItBlock(payload)}
+      </div>
+    `;
+  }
+
+  /** v1.10.16 — HardwareSuggestionDetector (v1.14.2) */
+  private _renderHardwareSuggestionBody(
+    insight: Insight,
+    payload: Record<string, unknown>,
+  ): TemplateResult {
+    const confidencePct = Math.round(insight.confidence * 100);
+    const category =
+      (payload.hardware_category as string | undefined) ?? "?";
+    const areaName = (payload.area_name as string | undefined) ?? "?";
+    const rationale = (payload.rationale as string | undefined) ?? "";
+    const unlocks = (payload.unlocks as string[] | undefined) ?? [];
+    const disclaimer =
+      (payload.non_commercial_disclaimer as string | undefined) ?? "";
+    return html`
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">hardware gap</span>
+        </div>
+        <h4 style="margin: 6px 0 0 0;">
+          Consider adding a ${category} to ${areaName}
+        </h4>
+        ${rationale
+          ? html`<div style="margin-top: 8px;">${rationale}</div>`
+          : nothing}
+        ${unlocks.length
+          ? html`<div style="margin-top: 12px;">
+              <strong>Would unlock:</strong>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px;
+                          margin-top: 6px;">
+                ${unlocks.map(
+                  (u) =>
+                    html`<span class="pill" style="background:
+                      rgba(76, 175, 80, 0.18); color: var(--success-color);">
+                      ${u}
+                    </span>`,
+                )}
+              </div>
+            </div>`
+          : nothing}
+        ${disclaimer
+          ? html`<div style="margin-top: 14px; padding: 8px 12px;
+                              background: var(--secondary-background-color);
+                              border-radius: 6px; font-size: 0.88em;
+                              color: var(--secondary-text-color);">
+              ${disclaimer}
+            </div>`
+          : nothing}
+      </div>
+    `;
+  }
+
+  /** v1.10.16 — StaleAutomationDetector */
+  private _renderStaleAutomationBody(
+    insight: Insight,
+    payload: Record<string, unknown>,
+  ): TemplateResult {
+    const confidencePct = Math.round(insight.confidence * 100);
+    const friendly =
+      (payload.friendly_name as string | undefined) ??
+      (payload.entity_id as string | undefined) ??
+      "?";
+    const daysIdle = payload.days_idle as number | undefined;
+    const lastTriggered = payload.last_triggered_iso as string | undefined;
+    return html`
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">stale automation</span>
+        </div>
+        <h4 style="margin: 6px 0 0 0;">${friendly}</h4>
+        <div style="color: var(--secondary-text-color); font-size: 0.95em;
+                    margin-top: 4px;">
+          ${daysIdle != null ? html`Idle ${daysIdle} days` : nothing}
+          ${lastTriggered
+            ? html` · last triggered ${lastTriggered.slice(0, 10)}`
+            : nothing}
+        </div>
+        ${insight.explanation
+          ? html`<div class="explanation" style="margin-top: 10px;">
+              ${insight.explanation}
+            </div>`
+          : nothing}
+      </div>
+    `;
+  }
+
+  /** v1.10.16 — WifiFindDetector (v1.18.0) */
+  private _renderWifiFindBody(
+    insight: Insight,
+    block: Record<string, unknown>,
+  ): TemplateResult {
+    const confidencePct = Math.round(insight.confidence * 100);
+    const entityId = (block.entity_id as string | undefined) ?? "?";
+    const proposedArea =
+      (block.proposed_area_name as string | undefined) ?? "?";
+    const apName = (block.ap_name as string | undefined) ?? "?";
+    const signalDbm = block.signal_dbm as number | undefined;
+    const confidenceTier = (block.confidence_tier as string | undefined) ?? "?";
+    return html`
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">wi-fi location</span>
+        </div>
+        <h4 style="margin: 6px 0 0 0;">
+          Probably in ${proposedArea}
+        </h4>
+        <div style="color: var(--secondary-text-color); font-size: 0.95em;
+                    margin-top: 4px;">
+          <code>${entityId}</code> sees <strong>${apName}</strong>
+          at ${signalDbm} dBm
+          (${confidenceTier.replace(/_/g, " ")})
+        </div>
+        ${insight.explanation
+          ? html`<div class="explanation" style="margin-top: 10px;">
+              ${insight.explanation}
+            </div>`
+          : nothing}
+      </div>
+    `;
   }
 
   /** v1.8.2 StateShiftDetector — "Daily-count for X shifted on YYYY-MM-DD." */
@@ -6947,16 +7221,38 @@ export class HaInsightsCard extends LitElement {
   }
 
   /** v1.2.3 — Footer that says "Showing N of M — +X more → View all".
-   *  Only appears when the dashboard tile is sized to show fewer rows
-   *  than the user actually has. Without it the tile shows 1 insight
-   *  with no hint that 25 more are queued behind "View all" in the
-   *  header. */
+   *  v1.10.16 — when `paginate: true` (set by the panel wrapper) the
+   *  footer renders as a button that fires `ha-insights-card-load-more`
+   *  so the panel can bump its cap and re-render. Without paginate the
+   *  footer is a plain link to /ha-insights, kept for dashboard tiles. */
   private _renderTruncationFooter(
     rendered: number,
   ): TemplateResult | typeof nothing {
     const total = this._totalFilteredCount;
     if (total <= rendered) return nothing;
     const hidden = total - rendered;
+    if (this._config.paginate) {
+      const next = Math.min(hidden, 200);
+      return html`
+        <button
+          class="truncation-footer"
+          type="button"
+          style="background: none; cursor: pointer; width: 100%;
+                 border-left: none; border-right: none; border-bottom: none;
+                 font: inherit;"
+          title="Load the next batch of insights"
+          @click=${() =>
+            this.dispatchEvent(
+              new CustomEvent("ha-insights-card-load-more", {
+                bubbles: true,
+                composed: true,
+              }),
+            )}
+        >
+          Showing ${rendered} of ${total} — load ${next} more ↓
+        </button>
+      `;
+    }
     return html`
       <a class="truncation-footer" href="/ha-insights" title="Open the full HA Insights panel">
         Showing ${rendered} of ${total} — +${hidden} more →
