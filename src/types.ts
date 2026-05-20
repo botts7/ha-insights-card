@@ -302,6 +302,13 @@ export interface CardConfig {
    *  for 🤖 Suggest calls fired from this card. Undefined = inherit
    *  the OptionsFlow value (defaults to "concise"). */
   audit_depth?: "concise" | "indepth";
+  /** v1.10.16: when true, the "Showing N of M" truncation footer
+   *  becomes a button that dispatches `ha-insights-card-load-more`
+   *  instead of linking to /ha-insights. The panel wrapper sets this
+   *  + listens, bumping its own cap so the card re-renders with more
+   *  rows. Default false — keeps the existing "View all" navigation
+   *  for dashboard tiles. */
+  paginate?: boolean;
 }
 
 /** Subset of the HA `hass` object the card uses. */
