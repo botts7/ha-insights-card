@@ -1327,6 +1327,95 @@ export class HaInsightsCard extends LitElement {
       border-radius: 4px;
       margin-top: 6px;
     }
+    /* v1.10.17 — generic structured-fields renderer for any insight
+       kind without a specialized card-body. Replaces the raw JSON dump
+       fallback that users reported on long-tail kinds (frequency_anomaly,
+       manual_habit, habitual_override, etc.). */
+    .structured-fields {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-top: 8px;
+    }
+    .structured-fields .sf-prose {
+      color: var(--primary-text-color);
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+    .structured-fields .sf-subject {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 14px;
+      background: var(--primary-color, #4c6ef5);
+      color: var(--text-primary-color, #fff);
+      font-size: 0.92em;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .structured-fields .sf-subject:hover {
+      filter: brightness(1.1);
+    }
+    .structured-fields .sf-section-label {
+      font-size: 0.78em;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--secondary-text-color);
+      margin: 0 0 4px 0;
+      font-weight: 600;
+    }
+    .structured-fields .sf-rows {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 6px 14px;
+      align-items: baseline;
+    }
+    .structured-fields .sf-rows dt {
+      color: var(--secondary-text-color);
+      font-size: 0.9em;
+      white-space: nowrap;
+    }
+    .structured-fields .sf-rows dd {
+      margin: 0;
+      color: var(--primary-text-color);
+      font-size: 0.95em;
+      overflow-wrap: anywhere;
+    }
+    .structured-fields .sf-rows dd code {
+      background: var(--secondary-background-color, #f5f5f5);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.92em;
+    }
+    .structured-fields .sf-observations {
+      margin: 0;
+      padding-left: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .structured-fields .sf-observations li {
+      color: var(--primary-text-color);
+      font-size: 0.92em;
+    }
+    .structured-fields .sf-raw-disclosure {
+      margin-top: 4px;
+    }
+    .structured-fields .sf-raw-disclosure summary {
+      cursor: pointer;
+      font-size: 0.82em;
+      color: var(--secondary-text-color);
+    }
+    .structured-fields .sf-raw-disclosure pre {
+      max-height: 280px;
+      overflow: auto;
+      font-size: 0.78em;
+      background: var(--code-editor-background-color, var(--secondary-background-color, #f5f5f5));
+      padding: 8px;
+      border-radius: 4px;
+      margin-top: 6px;
+    }
     .setup-step {
       border: 1px solid var(--divider-color, #e0e0e0);
       border-left: 4px solid var(--divider-color, #e0e0e0);
@@ -3920,6 +4009,14 @@ export class HaInsightsCard extends LitElement {
     // bookkeeping. The server-side writer (v1.5.34) strips the same
     // keys before write — this is the visual equivalent.
     const view = this._stripPrivateKeys(rawView);
+    // v1.10.17: pick a renderer based on payload_format. The JSON-dump
+    // view is correct for "automation" / "blueprint" (the user reviews
+    // what will be written) but unhelpful for "report" and unspecialized
+    // "card" insights — those get the structured-fields renderer below.
+    const useStructured =
+      !editing
+      && insight.payload_format !== "automation"
+      && insight.payload_format !== "blueprint";
     return html`
       <div class="payload-edit">
         <button
@@ -3943,8 +4040,338 @@ export class HaInsightsCard extends LitElement {
               ? html`<div class="payload-error">${parseError}</div>`
               : nothing}
           `
-        : html`<pre>${JSON.stringify(view, null, 2)}</pre>`}
+        : useStructured
+          ? this._renderStructuredFields(insight, view)
+          : html`<pre>${JSON.stringify(view, null, 2)}</pre>`}
     `;
+  }
+
+  /** v1.10.17 — generic structured-fields renderer for any payload
+   *  without a specialized card body. Replaces the raw JSON dump that
+   *  fell through for 20+ detector kinds (long_tail, frequency_anomaly,
+   *  manual_habit, habitual_override, presence_inference, etc.).
+   *
+   *  Extracts:
+   *    - subject:          entity_id (linked via more-info popup)
+   *    - prose:            rationale / description / summary
+   *    - observations:     array of structured findings or strings
+   *    - remaining fields: scalar / array values, humanised + labelled
+   *    - escape hatch:     "Show raw JSON" disclosure for power users
+   *
+   *  Keys already represented in the insight envelope (confidence,
+   *  detector, area, maturity) are skipped to avoid duplication with
+   *  the row-meta pills above. Same for entity_id when it's the subject.
+   */
+  private _renderStructuredFields(
+    insight: Insight,
+    payload: Record<string, unknown>,
+  ): TemplateResult {
+    // Subject: prefer fingerprint's entity_id (canonical) but fall back
+    // to payload-level entity_id / subject_entity_id when missing.
+    const fp = (insight.fingerprint ?? {}) as Record<string, unknown>;
+    const subjectEntityId =
+      (fp.entity_id as string | undefined)
+      ?? (payload.entity_id as string | undefined)
+      ?? (payload.subject_entity_id as string | undefined)
+      ?? null;
+
+    // Prose: collect the first non-empty narrative field. Many detectors
+    // emit one of these; some emit several with subtly different roles.
+    const proseFields = [
+      "rationale",
+      "description",
+      "summary",
+      "explanation",
+      "advice",
+    ];
+    const proseChunks: { label: string; text: string }[] = [];
+    for (const key of proseFields) {
+      const value = payload[key];
+      if (typeof value === "string" && value.trim().length > 0) {
+        proseChunks.push({
+          label: this._humaniseKey(key),
+          text: value.trim(),
+        });
+      }
+    }
+
+    // Observations: array of {kind, summary, ...} or array of strings.
+    const observationsRaw = payload.observations;
+    const observations: TemplateResult[] = [];
+    if (Array.isArray(observationsRaw)) {
+      for (const obs of observationsRaw) {
+        if (typeof obs === "string") {
+          observations.push(html`<li>${obs}</li>`);
+        } else if (obs && typeof obs === "object") {
+          const obsObj = obs as Record<string, unknown>;
+          const summary =
+            (obsObj.summary as string | undefined)
+            ?? (obsObj.text as string | undefined)
+            ?? (obsObj.message as string | undefined);
+          const obsKind = obsObj.kind as string | undefined;
+          // Render summary line + selected key=value pairs underneath.
+          const inlineFields = Object.entries(obsObj)
+            .filter(
+              ([k, v]) =>
+                k !== "summary"
+                && k !== "text"
+                && k !== "message"
+                && k !== "kind"
+                && v !== null
+                && v !== undefined
+                && (typeof v !== "object" || Array.isArray(v)),
+            )
+            .slice(0, 4); // cap to keep rows compact
+          observations.push(html`
+            <li>
+              ${summary
+                ? html`<span>${summary}</span>`
+                : obsKind
+                  ? html`<code>${obsKind}</code>`
+                  : nothing}
+              ${inlineFields.length
+                ? html`<span style="color: var(--secondary-text-color); margin-left: 6px;">
+                    ${inlineFields
+                      .map(
+                        ([k, v]) =>
+                          `${this._humaniseKey(k)}: ${this._formatScalar(v)}`,
+                      )
+                      .join(" · ")}
+                  </span>`
+                : nothing}
+            </li>
+          `);
+        }
+      }
+    }
+
+    // Remaining scalar / array fields, in detector-supplied order.
+    // Skip the ones we've already promoted above + envelope-duplicates.
+    const skipKeys = new Set<string>([
+      "entity_id",
+      "subject_entity_id",
+      "rationale",
+      "description",
+      "summary",
+      "explanation",
+      "advice",
+      "observations",
+      // Envelope duplicates (already shown in row-meta pills):
+      "confidence",
+      "detector",
+      "kind",
+      "title",
+      "area_id",
+      "maturity",
+      // Internal / formatting noise:
+      "type", // Lovelace card type
+    ]);
+    const scalarRows: { label: string; value: unknown }[] = [];
+    for (const [key, value] of Object.entries(payload)) {
+      if (skipKeys.has(key)) continue;
+      if (value === null || value === undefined) continue;
+      if (typeof value === "string" && value.trim().length === 0) continue;
+      scalarRows.push({ label: this._humaniseKey(key), value });
+    }
+
+    return html`
+      <div class="structured-fields">
+        ${subjectEntityId
+          ? html`
+              <a
+                class="sf-subject"
+                href="#"
+                @click=${(e: Event) => {
+                  e.preventDefault();
+                  this._openMoreInfo(subjectEntityId);
+                }}
+                title="Open ${subjectEntityId}"
+              >📄 ${subjectEntityId}</a>
+            `
+          : nothing}
+        ${proseChunks.map(
+          (chunk) => html`
+            <div>
+              <div class="sf-section-label">${chunk.label}</div>
+              <div class="sf-prose">${chunk.text}</div>
+            </div>
+          `,
+        )}
+        ${observations.length
+          ? html`
+              <div>
+                <div class="sf-section-label">
+                  Observations (${observations.length})
+                </div>
+                <ul class="sf-observations">
+                  ${observations}
+                </ul>
+              </div>
+            `
+          : nothing}
+        ${scalarRows.length
+          ? html`
+              <div>
+                <div class="sf-section-label">Details</div>
+                <dl class="sf-rows">
+                  ${scalarRows.map(
+                    (row) => html`
+                      <dt>${row.label}</dt>
+                      <dd>${this._renderStructuredValue(row.value)}</dd>
+                    `,
+                  )}
+                </dl>
+              </div>
+            `
+          : nothing}
+        <details class="sf-raw-disclosure">
+          <summary>Show raw payload (debug)</summary>
+          <pre>${JSON.stringify(payload, null, 2)}</pre>
+        </details>
+      </div>
+    `;
+  }
+
+  /** v1.10.17 — fire the standard HA `hass-more-info` event so the
+   *  host dialog opens the entity's more-info popup. Used by clickable
+   *  entity_id rows in the structured-fields fallback renderer. */
+  private _openMoreInfo(entityId: string): void {
+    if (!entityId) return;
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        detail: { entityId },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  /** v1.10.17 — convert snake_case / camelCase keys to "Title Case"
+   *  display labels. Includes a few hand-mapped overrides for keys
+   *  that would otherwise expand awkwardly (e.g. "iot_class"). */
+  private _humaniseKey(key: string): string {
+    const overrides: Record<string, string> = {
+      iot_class: "IoT class",
+      bssid: "BSSID",
+      ssid: "SSID",
+      rssi: "RSSI",
+      dbm: "dBm",
+      ap_mac: "AP MAC",
+      mac: "MAC",
+      url: "URL",
+      uuid: "UUID",
+      id: "ID",
+      yaml: "YAML",
+      json: "JSON",
+      ha: "HA",
+    };
+    if (overrides[key]) return overrides[key];
+    return key
+      .replace(/_/g, " ")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .split(" ")
+      .map((word) =>
+        overrides[word.toLowerCase()]
+          ? overrides[word.toLowerCase()]
+          : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase(),
+      )
+      .join(" ");
+  }
+
+  /** Convert a scalar (or short array) into a readable inline string.
+   *  Used for compact observation summaries. */
+  private _formatScalar(value: unknown): string {
+    if (value === null || value === undefined) return "—";
+    if (typeof value === "boolean") return value ? "yes" : "no";
+    if (typeof value === "number") {
+      // Integer or short float — leave alone.
+      return Number.isInteger(value) ? `${value}` : value.toFixed(2);
+    }
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+      if (value.length === 0) return "(empty)";
+      if (value.length <= 3) return value.map((v) => this._formatScalar(v)).join(", ");
+      return `${value.slice(0, 3).map((v) => this._formatScalar(v)).join(", ")} + ${value.length - 3} more`;
+    }
+    return JSON.stringify(value);
+  }
+
+  /** Pretty-render a single payload value as a <dd> body. Strings get
+   *  italic / code formatting based on heuristics; numbers stay plain;
+   *  arrays expand into comma-separated items; objects fall back to a
+   *  compact JSON snippet. */
+  private _renderStructuredValue(value: unknown): TemplateResult {
+    if (value === null || value === undefined) {
+      return html`<span style="color: var(--secondary-text-color);">—</span>`;
+    }
+    if (typeof value === "boolean") {
+      return html`${value ? "✓ yes" : "✗ no"}`;
+    }
+    if (typeof value === "number") {
+      return html`${Number.isInteger(value) ? value : value.toFixed(2)}`;
+    }
+    if (typeof value === "string") {
+      // ISO timestamp: render as relative + absolute
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) {
+        try {
+          const d = new Date(value);
+          return html`<span title="${value}">${d.toLocaleString()}</span>`;
+        } catch {
+          return html`${value}`;
+        }
+      }
+      // entity_id pattern: highlight as code, click → more-info
+      if (/^[a-z_]+\.[a-z0-9_]+$/.test(value)) {
+        return html`<code
+          style="cursor: pointer; text-decoration: underline; text-decoration-style: dotted;"
+          @click=${() => this._openMoreInfo(value)}
+          title="Open ${value}"
+        >${value}</code>`;
+      }
+      // URL: render as link
+      if (/^https?:\/\//.test(value) || value.startsWith("/")) {
+        return html`<a href="${value}" target="_top">${value}</a>`;
+      }
+      return html`${value}`;
+    }
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        return html`<span style="color: var(--secondary-text-color);">(empty list)</span>`;
+      }
+      // Short array of strings: comma list.
+      if (value.every((v) => typeof v === "string" || typeof v === "number")) {
+        return html`${value.join(", ")}`;
+      }
+      // Array of objects: dump count + collapsed disclosure.
+      return html`
+        <details>
+          <summary>${value.length} items</summary>
+          <pre style="font-size: 0.82em; margin-top: 4px;">
+${JSON.stringify(value, null, 2)}
+          </pre>
+        </details>
+      `;
+    }
+    if (typeof value === "object") {
+      const entries = Object.entries(value as Record<string, unknown>);
+      if (entries.length === 0) {
+        return html`<span style="color: var(--secondary-text-color);">(empty)</span>`;
+      }
+      if (entries.length <= 4) {
+        return html`${entries
+          .map(([k, v]) => `${this._humaniseKey(k)}: ${this._formatScalar(v)}`)
+          .join(" · ")}`;
+      }
+      return html`
+        <details>
+          <summary>${entries.length} fields</summary>
+          <pre style="font-size: 0.82em; margin-top: 4px;">
+${JSON.stringify(value, null, 2)}
+          </pre>
+        </details>
+      `;
+    }
+    return html`${String(value)}`;
   }
 
   /** v1.2.16 — drop top-level keys prefixed with `_` from the YAML
