@@ -1142,21 +1142,43 @@ export class HaInsightsPanel extends LitElement {
    *  panel re-renders. Without this, every hass update creates a fresh
    *  config object → setConfig → reactive @state churn on the card. */
   private _cachedCardConfig?: CardConfig;
-  private _cachedCardConfigKey?: string;
+  private _cachedFilterKey?: string;
+  private _cachedConfigKey?: string;
   private get _embeddedCardConfig(): CardConfig {
-    const key =
+    // v1.10.17 — split into two keys so "Load more" works correctly.
+    // Previous (v1.10.16) used a single combined key and reset
+    // _paginationStep=0 inside the cache-miss branch — which fired on
+    // every key change INCLUDING pagination bumps. Net effect: clicking
+    // "Load more" bumped the step to 1, the getter saw the key change,
+    // reset it back to 0, and the cap stayed at 200. Load-more button
+    // appeared dead.
+    //
+    // The filterKey only changes when a filter/sort/search actually
+    // changes — that's when we reset pagination. The configKey adds
+    // the pagination step on top so the cached config object is
+    // rebuilt when EITHER changes.
+    const filterKey =
       `${this._search}|${this._minConfidence}|${this._sortBy}|${this._groupBy}|` +
       `${this._filterDomains.join(",")}|${this._filterAreas.join(",")}|` +
       `${this._filterDeviceClasses.join(",")}|${this._filterDetectors.join(",")}|` +
       `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}|` +
       `${this._filterLabels.join(",")}|` +
       `${this._hideAlreadyAutomated ? "1" : "0"}|` +
-      `${this._auditDepth}|p${this._paginationStep}`;
-    if (this._cachedCardConfigKey !== key) {
-      this._cachedCardConfigKey = key;
-      // v1.10.16: filters / sort / search changed — reset pagination
-      // so the user doesn't keep paginating through a stale set.
+      `${this._auditDepth}`;
+    // Reset pagination only when the filter actually changed (and only
+    // after the first time we cache a filter — initial mount should
+    // not reset step). Do this BEFORE the configKey is computed so
+    // pagination=0 is included in the cached config on filter change.
+    if (
+      this._cachedFilterKey !== undefined
+      && this._cachedFilterKey !== filterKey
+    ) {
       this._paginationStep = 0;
+    }
+    this._cachedFilterKey = filterKey;
+    const configKey = `${filterKey}|p${this._paginationStep}`;
+    if (this._cachedConfigKey !== configKey) {
+      this._cachedConfigKey = configKey;
       this._cachedCardConfig = {
         type: "custom:ha-insights-card",
         title: this._search ? `Insights matching "${this._search}"` : "All insights",

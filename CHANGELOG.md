@@ -2,6 +2,28 @@
 
 ## [1.10.17] — 2026-05-20
 
+### Fixed — "Load 200 more ↓" button did nothing
+
+Reported 2026-05-20: clicking the panel's truncation footer button
+appeared dead. The button DID fire `ha-insights-card-load-more`,
+the panel listener DID bump `_paginationStep` to 1 — but the
+cached-config getter then RESET it back to 0 in the same render
+pass.
+
+Root cause: v1.10.16 used a single combined cache key that
+included the pagination step, and the cache-miss branch
+unconditionally reset `_paginationStep = 0` (intent: reset on
+filter/sort/search change). Pagination bumps and filter changes
+both hit the same branch — the reset fired on EVERY key change,
+including pagination ones, so the step never persisted.
+
+Fix: split into two cache keys. `_cachedFilterKey` captures only
+the filter/sort/search dimensions and is the trigger for reset.
+`_cachedConfigKey` adds the pagination step on top and is the
+trigger for cache rebuild. The reset now fires ONLY when the
+filter key actually changed (and only after the first cache, so
+initial mount doesn't reset the initial step).
+
 ### Fixed — raw JSON dump replaced with structured-fields renderer
 
 Reported 2026-05-20 (Kogan92 modal showed raw JSON instead of a
