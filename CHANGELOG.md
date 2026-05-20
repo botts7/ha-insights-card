@@ -1,5 +1,65 @@
 # Changelog
 
+## [1.10.17] — 2026-05-20
+
+### Fixed — raw JSON dump replaced with structured-fields renderer
+
+Reported 2026-05-20 (Kogan92 modal showed raw JSON instead of a
+subject-specific renderer). v1.10.16 added five specialized
+renderers for v1.14.x detector kinds, but the codebase has 25+
+insight kinds — the other 20+ still fell through to a raw
+`JSON.stringify(payload, null, 2)` dump in the modal.
+
+The holistic fix: a generic structured-fields renderer that runs
+for every insight whose `payload_format` is not `automation` or
+`blueprint` (where the JSON view IS correct — the user reviews
+YAML before applying).
+
+### What it extracts
+
+- **Subject**: `fingerprint.entity_id` (or `payload.entity_id` /
+  `payload.subject_entity_id`), rendered as a chip that opens
+  the HA more-info dialog on click.
+- **Prose blocks**: `rationale`, `description`, `summary`,
+  `explanation`, `advice` — labelled, line-broken, preserved.
+- **Observations**: array of `{kind, summary, ...}` objects or
+  plain strings, rendered as a bulleted list with key=value
+  pairs underneath each item.
+- **Remaining fields**: scalar / array values pretty-formatted
+  into a `<dl>` of `key: value` rows. Special handling for:
+    - ISO timestamps → relative + tooltip with absolute
+    - entity_id-shaped strings → underlined code, click → more-info
+    - URLs → real links
+    - booleans → ✓ / ✗
+    - nested objects (>4 keys) → collapsed `<details>` disclosure
+- **Escape hatch**: "Show raw payload (debug)" disclosure at the
+  bottom for power users who need the raw JSON.
+
+Envelope-duplicates (`detector`, `confidence`, `kind`, `title`,
+`area_id`, `maturity`) and internal noise (`type`) are skipped.
+The existing `_stripPrivateKeys` already drops underscore-prefixed
+detector bookkeeping.
+
+### Coverage
+
+Every detector that emits `payload_format="report"` or `"card"`
+without a specialized renderer now displays cleanly:
+
+`adaptive_feedback`, `automation_audit` (report mode),
+`button_press_habit` (when not an automation), `frequency_anomaly`,
+`goal_tracker`, `habitual_override`, `hardware_suggestion`,
+`location_proposal`, `manual_habit`, `orphan_device`,
+`phone_charge_reminder`, `phone_commute`, `phone_sleep_window`,
+`physical_device_link`, `presence_inference`, `redundant_target`,
+`reboot_loop`, `routine`, `setup_quality_feature`, `state_shift`,
+`streak`, `trigger_drift`, `unavailable_device_fixit`,
+`weather_correlation`, `wifi_find` — plus any future detector.
+
+Eight already had specialized card-body renderers (state_shift,
+physical_device_link, location_proposal, wifi_find,
+unavailable_device_fixit, reboot_loop, hardware_suggestion,
+stale_automation); those branches are unchanged.
+
 ## [1.10.14] — 2026-05-19
 
 ### Fixed — diagnostics "Copy to clipboard" failed in some HA panels
