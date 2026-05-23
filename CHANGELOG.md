@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.10.18] — 2026-05-23
+
+### Added — Dismiss all visible / Retire all visible buttons
+
+Counterpart to the existing "Apply all visible" toolbar button.
+From Discussion #104 (dziban303): user had 105 Uptime Kuma noise
+items to clear one click at a time.
+
+Two new buttons next to "Apply all visible":
+
+- **Dismiss all visible** — hits `home_insights/bulk_dismiss`
+  (integration v1.23.0+) for every insight matching the current
+  search + min-confidence filters. Confirms first. Dismissed
+  insights can resurface on a future scan if the pattern persists.
+- **Retire all visible** — hits `home_insights/bulk_retire`. Same
+  filtered set, but retire is permanent per-fingerprint — louder
+  confirmation prompt mentions this explicitly.
+
+Both work on any payload_format (the original "Apply all visible"
+is restricted to `payload_format=="automation"` because applying
+only makes sense for automation suggestions; dismiss / retire apply
+to every insight kind).
+
+Shared helper `_listVisibleForBulk()` runs the same filter chain
+the panel renders, so the operation is always scoped to what the
+user actually sees.
+
+### Requires
+
+HA Insights integration v1.23.0+. On older integrations, the
+buttons surface a friendly "Could not list" toast and no
+destructive action runs.
+
 ## [1.10.17] — 2026-05-20
 
 ### Fixed — "Load 200 more ↓" button did nothing
