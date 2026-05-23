@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.10.19] — 2026-05-23
+
+### Added — Verdict-action tooltips on Dismiss / Snooze / Retire / Suppress Device
+
+From Discussion #104 (dziban303) — the three lifecycle actions
+were visually indistinguishable buttons; the only mental-model
+hint was the Retire tooltip. Newcomers had to figure out the
+distinctions from context.
+
+Updated tooltips across all four verdict actions, all surfaces
+(refined-preview dialog, audit-body dialog, setup-quality dialog,
+main insight dialog, managed-devices section):
+
+- **Dismiss** — "One-off 'not now'. Hidden from the panel, but the
+  pattern can resurface on a future scan if it persists. Use Snooze
+  for a known temporary skip, Retire for a permanent decision."
+- **Snooze 7d** — "Hide for 7 days. After that, the next scan can
+  re-emit this insight. For when you'll deal with it later — e.g.
+  'I'm travelling this week'."
+- **Retire** — "Permanent 'don't auto-suggest' for THIS specific
+  suggestion-fingerprint. The same entity can still produce
+  different findings from other detectors. Reversible from the
+  history view."
+- **Suppress Device** — "Stop surfacing future insights from this
+  device, across EVERY detector. Existing insights stay until the
+  next scan. Reversible — click again to restore."
+
+The Managed-Devices section header was also rewritten to spell
+out the three-tier hierarchy (Dismiss → Retire → Suppress Device)
+inline.
+
 ## [1.10.18] — 2026-05-23
 
 ### Added — Dismiss all visible / Retire all visible buttons
