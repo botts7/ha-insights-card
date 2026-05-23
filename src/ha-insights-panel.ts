@@ -2255,6 +2255,131 @@ export class HaInsightsPanel extends LitElement {
     }
   }
 
+  /** v1.10.18 — Bulk dismiss every visible insight in one WS call.
+   *  Counterpart to "Apply all visible" but for clearing noise rather
+   *  than triaging suggestions. Hits home_insights/bulk_dismiss
+   *  (integration v1.23.0+), which mirrors the per-id dismiss
+   *  semantics: writes a "dismissed" verdict, clears any HA Repairs
+   *  issue mirrored from the insight, and returns a summary. Works
+   *  on insights of any payload_format (unlike "Apply all visible"
+   *  which only targets automation suggestions). Confirms first
+   *  because the operation is destructive across many items at once,
+   *  though each dismiss IS individually reversible. */
+  private async _runBulkDismiss(): Promise<void> {
+    if (!this.hass) return;
+    const visible = await this._listVisibleForBulk();
+    if (visible === null) return; // toast already shown
+    if (visible.length === 0) {
+      this._showToast("Nothing to dismiss");
+      return;
+    }
+    const proceed = window.confirm(
+      `Dismiss ${visible.length} insight${visible.length === 1 ? "" : "s"}? `
+        + "Each will be hidden from the panel; the pattern can resurface "
+        + "on a future scan if it persists. Use Retire instead for a "
+        + "permanent decision.",
+    );
+    if (!proceed) return;
+
+    this._bulkBusy = true;
+    try {
+      const result = await this.hass.connection.sendMessagePromise<{
+        dismissed: number;
+        not_found: string[];
+      }>({
+        type: "home_insights/bulk_dismiss",
+        insight_ids: visible.map((i) => i.id),
+      });
+      const nf = result.not_found?.length ?? 0;
+      this._showToast(
+        nf === 0
+          ? `Dismissed all ${result.dismissed}`
+          : `Dismissed ${result.dismissed} / ${visible.length}; ${nf} not found (already cleared?)`,
+      );
+    } catch (err) {
+      const message = (err as { message?: string }).message ?? String(err);
+      this._showToast(`Bulk dismiss failed: ${message}`);
+    } finally {
+      this._bulkBusy = false;
+    }
+  }
+
+  /** v1.10.18 — Bulk retire every visible insight in one WS call.
+   *  Retire is PERMANENT per-fingerprint: re-detections of the same
+   *  pattern stay suppressed until explicitly cleared via the history
+   *  view. Confirmation prompt is louder than dismiss for that reason
+   *  ("permanent" called out explicitly). Useful for clearing 105
+   *  Uptime-Kuma-style noise items in one go when the user knows the
+   *  whole category isn't going to become interesting later. */
+  private async _runBulkRetire(): Promise<void> {
+    if (!this.hass) return;
+    const visible = await this._listVisibleForBulk();
+    if (visible === null) return; // toast already shown
+    if (visible.length === 0) {
+      this._showToast("Nothing to retire");
+      return;
+    }
+    const proceed = window.confirm(
+      `Retire ${visible.length} insight${visible.length === 1 ? "" : "s"}? \n\n`
+        + "This is PERMANENT — re-detections of the same fingerprint stay "
+        + "suppressed until you Unretire them from the history view. "
+        + "Use Dismiss if you'd rather just hide them for now.",
+    );
+    if (!proceed) return;
+
+    this._bulkBusy = true;
+    try {
+      const result = await this.hass.connection.sendMessagePromise<{
+        retired: number;
+        not_found: string[];
+      }>({
+        type: "home_insights/bulk_retire",
+        insight_ids: visible.map((i) => i.id),
+      });
+      const nf = result.not_found?.length ?? 0;
+      this._showToast(
+        nf === 0
+          ? `Retired all ${result.retired}`
+          : `Retired ${result.retired} / ${visible.length}; ${nf} not found`,
+      );
+    } catch (err) {
+      const message = (err as { message?: string }).message ?? String(err);
+      this._showToast(`Bulk retire failed: ${message}`);
+    } finally {
+      this._bulkBusy = false;
+    }
+  }
+
+  /** v1.10.18 — Shared "what's visible to the user right now" query.
+   *  Used by _runBulkDismiss / _runBulkRetire so both apply to the
+   *  same filtered set the user sees in the panel. Mirrors the
+   *  _runBulkApply filter chain (search + min_confidence) but
+   *  doesn't restrict to payload_format=="automation" — every
+   *  insight kind is dismissable. */
+  private async _listVisibleForBulk(): Promise<
+    Array<{ id: string; title: string }> | null
+  > {
+    if (!this.hass) return null;
+    try {
+      const result = await this.hass.connection.sendMessagePromise<{
+        insights: Array<{
+          id: string;
+          title: string;
+          confidence: number;
+        }>;
+      }>({ type: "home_insights/list" });
+      const search = this._search.trim().toLowerCase();
+      return result.insights
+        .filter((i) => i.confidence >= this._minConfidence)
+        .filter((i) => !search || i.title.toLowerCase().includes(search));
+    } catch (err) {
+      this._showToast(
+        `Could not list: ${(err as { message?: string }).message ?? String(err)}`,
+      );
+      return null;
+    }
+  }
+
   private _showToast(message: string): void {
     this._toast = message;
     window.clearTimeout(this._toastTimer);
@@ -2465,6 +2590,28 @@ export class HaInsightsPanel extends LitElement {
             ${this._bulkBusy
               ? "Applying…"
               : html`<ha-icon icon="mdi:check-all"></ha-icon> Apply all visible`}
+          </button>
+          <button
+            class="action"
+            ?disabled=${this._bulkBusy}
+            aria-label="Dismiss every visible insight"
+            title="Dismiss every visible insight (respects search + confidence filters). Dismissed insights can resurface on a future scan if the pattern persists. Confirms first."
+            @click=${this._runBulkDismiss}
+          >
+            ${this._bulkBusy
+              ? "Working…"
+              : html`<ha-icon icon="mdi:close-circle-outline"></ha-icon> Dismiss all visible`}
+          </button>
+          <button
+            class="action"
+            ?disabled=${this._bulkBusy}
+            aria-label="Retire every visible insight (permanent)"
+            title="Retire every visible insight (respects search + confidence filters). PERMANENT per-fingerprint — re-detections stay suppressed until Unretire from the history view. Confirms first."
+            @click=${this._runBulkRetire}
+          >
+            ${this._bulkBusy
+              ? "Working…"
+              : html`<ha-icon icon="mdi:archive-outline"></ha-icon> Retire all visible`}
           </button>
         </div>
         </div>
