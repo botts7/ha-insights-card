@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.10.20] — 2026-05-23
+
+### Added — Per-detector / per-group collapse/expand
+
+From Task #242 (originally raised when user had "Showing 200 of
+788" with all sections fully expanded). When any group (detector,
+area, floor, integration, label) has more than 5 items, the
+section starts collapsed showing only the top 5 — with a clickable
+chevron header and a "Show all N (M more) ▾" footer button.
+
+- Sections with ≤5 items: unchanged. Plain header, all rows.
+- Sections with >5 items: chevron header + top-5 preview + footer.
+  Click anywhere on header (or the footer) to expand. Expanded
+  state persists for the session, resets on page reload.
+
+To benefit from this, set the panel's **Group by** dropdown to
+something other than "None" (Detector / Area / Floor / Integration
+/ Label). With "None" the panel is one flat list and there's
+nothing to collapse.
+
+Threshold is a constant (`GROUP_COLLAPSE_LIMIT = 5`); not currently
+exposed as a config option. Set with a real-install triage workflow
+in mind: 5 items is enough to see the highest-confidence picks per
+section, dismiss/apply them, and rescan — without scrolling past
+50 long-tail items to reach the next detector.
+
 ## [1.10.19] — 2026-05-23
 
 ### Added — Verdict-action tooltips on Dismiss / Snooze / Retire / Suppress Device

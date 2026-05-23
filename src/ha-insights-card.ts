@@ -195,6 +195,19 @@ export class HaInsightsCard extends LitElement {
   /** v1.1: insight ids whose cohort_members list is currently shown
    *  expanded. Click "▸ show N" to toggle. Per-row state; not persisted. */
   @state() private _expandedCohorts: Set<string> = new Set();
+  /** v1.10.20: group section keys the user has EXPANDED beyond the
+   *  default top-N preview. Groups with >GROUP_COLLAPSE_LIMIT items
+   *  start collapsed (only top N visible + "Show all M ↓" footer);
+   *  clicking the footer adds the key to this set and the full list
+   *  renders. Not persisted across page reloads — that would surprise
+   *  users who hide a noisy section and forget. */
+  @state() private _expandedGroups: Set<string> = new Set();
+  /** v1.10.20: when a group has > this many items, collapse by default
+   *  to a preview of the top N. Tuned for the typical triage workflow:
+   *  5 items per detector section is enough to see the highest-
+   *  confidence picks, dismiss/apply them, and rescan — without
+   *  scrolling past 50 long-tail items to reach the next detector. */
+  private static readonly GROUP_COLLAPSE_LIMIT = 5;
   @state() private _refineAutomationModal?: {
     automationId: string;
     alias: string;
@@ -534,6 +547,44 @@ export class HaInsightsCard extends LitElement {
       color: var(--secondary-text-color);
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.02));
       border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.06));
+    }
+    /* v1.10.20 — clickable group header w/ chevron when a section can
+       be collapsed/expanded. Plain headers (≤GROUP_COLLAPSE_LIMIT items)
+       look the same as before. */
+    .group-header.collapsible {
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .group-header.collapsible:hover {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.05));
+    }
+    .group-header .group-chevron {
+      display: inline-block;
+      transition: transform 0.12s ease-out;
+      font-size: 0.9em;
+    }
+    .group-header.collapsible.expanded .group-chevron {
+      transform: rotate(90deg);
+    }
+    /* "Show all N ↓" / "Collapse ↑" footer button at the bottom of a
+       collapsed section. */
+    .group-show-more {
+      padding: 8px 16px;
+      font-size: 0.85em;
+      color: var(--primary-color, #4c6ef5);
+      background: var(--card-background-color, transparent);
+      cursor: pointer;
+      border: none;
+      width: 100%;
+      text-align: left;
+      border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.06));
+      font-family: inherit;
+    }
+    .group-show-more:hover {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.03));
     }
     .row {
       padding: 12px 16px;
@@ -4688,6 +4739,79 @@ ${JSON.stringify(value, null, 2)}
 
   /** Bucket insights by the configured group_by key. Returns ordered
    *  pairs so the render can produce stable section ordering. */
+  /** v1.10.20 — render one group section with collapse/expand for
+   *  sections above the GROUP_COLLAPSE_LIMIT threshold.
+   *
+   *  Behaviour:
+   *    - <=GROUP_COLLAPSE_LIMIT items: header + all rows. Plain look,
+   *      no chevron — there's nothing to collapse.
+   *    - >GROUP_COLLAPSE_LIMIT items: clickable header with chevron.
+   *      Collapsed = top N rows + "Show all M ↓" footer button.
+   *      Expanded = all rows + "Show less ↑" footer button.
+   *
+   *  Default is collapsed. Per-session state in _expandedGroups; not
+   *  persisted across reloads. */
+  private _renderGroupSection(
+    key: string,
+    items: Insight[],
+  ): TemplateResult[] {
+    const total = items.length;
+    const limit = HaInsightsCard.GROUP_COLLAPSE_LIMIT;
+    const expandable = total > limit;
+    const expanded = this._expandedGroups.has(key);
+    const visible = !expandable || expanded ? items : items.slice(0, limit);
+    const out: TemplateResult[] = [];
+    if (expandable) {
+      out.push(html`
+        <div
+          class="group-header collapsible ${expanded ? "expanded" : ""}"
+          role="button"
+          tabindex="0"
+          aria-expanded=${expanded}
+          @click=${() => this._toggleGroup(key)}
+          @keydown=${(e: KeyboardEvent) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              this._toggleGroup(key);
+            }
+          }}
+          title=${expanded
+            ? `Collapse ${key} back to top ${limit}`
+            : `${total - limit} more hidden — click to expand`}
+        >
+          <span class="group-chevron">▸</span>
+          <span>${key} (${total})</span>
+        </div>
+      `);
+    } else {
+      out.push(html`<div class="group-header">${key} (${total})</div>`);
+    }
+    out.push(...visible.map((i) => this._renderRow(i)));
+    if (expandable) {
+      out.push(html`
+        <button
+          class="group-show-more"
+          type="button"
+          @click=${() => this._toggleGroup(key)}
+        >
+          ${expanded
+            ? html`▴ Show less`
+            : html`▾ Show all ${total} ${key} (${total - limit} more)`}
+        </button>
+      `);
+    }
+    return out;
+  }
+
+  /** v1.10.20 — toggle a group's expanded state. Triggers reactive
+   *  re-render via @state on _expandedGroups. */
+  private _toggleGroup(key: string): void {
+    const next = new Set(this._expandedGroups);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    this._expandedGroups = next;
+  }
+
   private _grouped(rows: Insight[]): Array<[string, Insight[]]> {
     const key = this._config.group_by ?? "none";
     if (key === "none") return [["", rows]];
@@ -7638,10 +7762,7 @@ ${JSON.stringify(value, null, 2)}
             </div>`
           : this._grouped(rows).flatMap(([key, items]) =>
               key
-                ? [
-                    html`<div class="group-header">${key} (${items.length})</div>`,
-                    ...items.map((i) => this._renderRow(i)),
-                  ]
+                ? this._renderGroupSection(key, items)
                 : items.map((i) => this._renderRow(i)),
             )}
         ${this._renderTruncationFooter(rows.length)}
